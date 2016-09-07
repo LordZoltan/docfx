@@ -3,6 +3,7 @@
 
 namespace Microsoft.DocAsCode.Build.ResourceFiles
 {
+    using System;
     using System.Collections.Generic;
     using System.Collections.Immutable;
     using System.Composition;
@@ -75,11 +76,13 @@ namespace Microsoft.DocAsCode.Build.ResourceFiles
 
             var filePath = Path.Combine(file.BaseDir, file.File);
             var repoDetail = GitUtility.GetGitDetail(filePath);
-            var displayLocalPath = repoDetail?.RelativePath ?? Path.Combine(file.BaseDir, file.File).ToDisplayPath();
+            var displayLocalPath = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, file.FullPath);
+
             return new FileModel(file, content)
             {
                 Uids = string.IsNullOrEmpty(uid) ? ImmutableArray<UidDefinition>.Empty : ImmutableArray<UidDefinition>.Empty.Add(new UidDefinition(uid, displayLocalPath)),
-                LocalPathFromRepoRoot = displayLocalPath
+                LocalPathFromRepoRoot = repoDetail?.RelativePath ?? Path.Combine(file.BaseDir, file.File).ToDisplayPath(),
+                LocalPathFromRoot = displayLocalPath
             };
         }
 

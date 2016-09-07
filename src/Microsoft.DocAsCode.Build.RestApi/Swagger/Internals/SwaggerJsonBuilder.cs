@@ -13,24 +13,38 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
 
     internal class SwaggerJsonBuilder
     {
-        private IDictionary<string, SwaggerObject> _documentObjectCache;
+        private IDictionary<string, SwaggerObjectBase> _documentObjectCache;
+        private IDictionary<string, SwaggerObject> _resolvedObjectCache;
+        private const string DefinitionsKey = "definitions";
+        private const string ParametersKey = "parameters";
+        private const string InternalRefNameKey = "x-internal-ref-name";
+        private const string InternalLoopRefNameKey = "x-internal-loop-ref-name";
 
         public SwaggerObjectBase Read(JsonReader reader)
         {
-            _documentObjectCache = new Dictionary<string, SwaggerObject>();
+            _documentObjectCache = new Dictionary<string, SwaggerObjectBase>();
+            _resolvedObjectCache = new Dictionary<string, SwaggerObject>();
             var token = JToken.ReadFrom(reader);
             var swagger = Build(token);
-            return ResolveReferences(swagger);
+            RemoveReferenceDefinitions((SwaggerObject)swagger);
+            return ResolveReferences(swagger, new Stack<string>());
         }
 
         private SwaggerObjectBase Build(JToken token)
         {
+            // Fetch from cache first
+            var location = GetLocation(token);
+            SwaggerObjectBase existingObject;
+            if (_documentObjectCache.TryGetValue(location, out existingObject))
+            {
+                return existingObject;
+            }
+
             var jObject = token as JObject;
             if (jObject != null)
             {
-                JToken referenceToken;
-
                 // Only one $ref is allowed inside a swagger JObject
+                JToken referenceToken;
                 if (jObject.TryGetValue("$ref", out referenceToken))
                 {
                     if (referenceToken.Type != JTokenType.String && referenceToken.Type != JTokenType.Null)
@@ -38,46 +52,41 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                         throw new JsonException($"JSON reference $ref property must have a string or null value, instead of {referenceToken.Type}, location: {referenceToken.Path}.");
                     }
 
-                    SwaggerReferenceObject deferredObject = new SwaggerReferenceObject();
-                    deferredObject.DeferredReference = (string)referenceToken;
+                    var formatted = RestApiHelper.FormatReferenceFullPath((string)referenceToken);
+                    var deferredObject = new SwaggerReferenceObject
+                    {
+                        DeferredReference = formatted.Item1,
+                        ReferenceName = formatted.Item2,
+                        Location = location
+                    };
 
                     // For swagger, other properties are still allowed besides $ref, e.g.
                     // "schema": {
-                    //   "$ref": "#/defintions/foo"
+                    //   "$ref": "#/definitions/foo"
                     //   "example": { }
                     // }
                     // Use Token property to keep other properties
                     // These properties cannot be referenced
                     jObject.Remove("$ref");
                     deferredObject.Token = jObject;
+                    _documentObjectCache.Add(location, deferredObject);
                     return deferredObject;
                 }
-                else
+
+                var swaggerObject = new SwaggerObject { Location = location };
+                foreach (KeyValuePair<string, JToken> property in jObject)
                 {
-                    string location = GetLocation(token);
-
-                    SwaggerObject existingObject;
-                    if (_documentObjectCache.TryGetValue(location, out existingObject))
-                    {
-                        return existingObject;
-                    }
-
-                    var swaggerObject = new SwaggerObject { Location = location };
-
-                    foreach (KeyValuePair<string, JToken> property in jObject)
-                    {
-                        swaggerObject.Dictionary.Add(property.Key, Build(property.Value));
-                    }
-
-                    _documentObjectCache.Add(location, swaggerObject);
-                    return swaggerObject;
+                    swaggerObject.Dictionary.Add(property.Key, Build(property.Value));
                 }
+
+                _documentObjectCache.Add(location, swaggerObject);
+                return swaggerObject;
             }
 
             var jArray = token as JArray;
             if (jArray != null)
             {
-                var swaggerArray = new SwaggerArray();
+                var swaggerArray = new SwaggerArray { Location = location };
                 foreach (var property in jArray)
                 {
                     swaggerArray.Array.Add(Build(property));
@@ -88,11 +97,25 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
 
             return new SwaggerValue
             {
+                Location = location,
                 Token = token
             };
         }
 
-        private SwaggerObjectBase ResolveReferences(SwaggerObjectBase swaggerBase)
+        private static void RemoveReferenceDefinitions(SwaggerObject root)
+        {
+            // Remove definitions and parameters which has been added into _documentObjectCache
+            if (root.Dictionary.ContainsKey(DefinitionsKey))
+            {
+                root.Dictionary.Remove(DefinitionsKey);
+            }
+            if (root.Dictionary.ContainsKey(ParametersKey))
+            {
+                root.Dictionary.Remove(ParametersKey);
+            }
+        }
+
+        private SwaggerObjectBase ResolveReferences(SwaggerObjectBase swaggerBase, Stack<string> refStack)
         {
             if (swaggerBase.ReferencesResolved)
             {
@@ -107,18 +130,46 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                         var swagger = (SwaggerReferenceObject)swaggerBase;
                         if (!string.IsNullOrEmpty(swagger.DeferredReference))
                         {
-                            if (swagger.DeferredReference[0] != '#')
+                            if (swagger.DeferredReference[0] != '/')
                             {
-                                throw new JsonException($"reference \"{swagger.DeferredReference}\" is not supported. Reference must be inside current schema document starting with #");
+                                throw new JsonException($"reference \"{swagger.DeferredReference}\" is not supported. Reference must be inside current schema document starting with /");
                             }
 
-                            SwaggerObject referencedObject;
-                            if (!_documentObjectCache.TryGetValue(swagger.DeferredReference, out referencedObject))
+                            SwaggerObjectBase referencedObjectBase;
+                            if (!_documentObjectCache.TryGetValue(swagger.DeferredReference, out referencedObjectBase))
                             {
                                 throw new JsonException($"Could not resolve reference '{swagger.DeferredReference}' in the document.");
                             }
 
-                            swagger.Reference = referencedObject;
+                            if (refStack.Contains(referencedObjectBase.Location))
+                            {
+                                var loopRef = new SwaggerLoopReferenceObject();
+                                loopRef.Dictionary.Add(InternalLoopRefNameKey, new SwaggerValue { Token = swagger.ReferenceName });
+                                return loopRef;
+                            }
+
+                            SwaggerObject existingObject;
+                            if (_resolvedObjectCache.TryGetValue(swagger.DeferredReference, out existingObject))
+                            {
+                                return existingObject;
+                            }
+
+                            // Clone to avoid change the reference object in _documentObjectCache
+                            refStack.Push(referencedObjectBase.Location);
+                            var resolved = ResolveReferences(referencedObjectBase.Clone(), refStack);
+                            var swaggerObject = ResolveSwaggerObject(resolved);
+                            if (!swaggerObject.Dictionary.ContainsKey(InternalRefNameKey))
+                            {
+                                swaggerObject.Dictionary.Add(InternalRefNameKey, new SwaggerValue { Token = swagger.ReferenceName });
+                            }
+                            swagger.Reference = swaggerObject;
+                            refStack.Pop();
+
+                            if (refStack.Count == 0)
+                            {
+                                _resolvedObjectCache.Add(swagger.DeferredReference, swagger.Reference);
+                            }
+
                         }
                         return swagger;
                     }
@@ -127,7 +178,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                         var swagger = (SwaggerObject)swaggerBase;
                         foreach (var key in swagger.Dictionary.Keys.ToList())
                         {
-                            swagger.Dictionary[key] = ResolveReferences(swagger.Dictionary[key]);
+                            swagger.Dictionary[key] = ResolveReferences(swagger.Dictionary[key], refStack);
                         }
                         return swagger;
                     }
@@ -136,7 +187,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                         var swagger = (SwaggerArray)swaggerBase;
                         for (int i = 0; i < swagger.Array.Count; i++)
                         {
-                            swagger.Array[i] = ResolveReferences(swagger.Array[i]);
+                            swagger.Array[i] = ResolveReferences(swagger.Array[i], refStack);
                         }
                         return swagger;
                     }
@@ -145,6 +196,23 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                 default:
                     throw new NotSupportedException(swaggerBase.ObjectType.ToString());
             }
+        }
+
+        private static SwaggerObject ResolveSwaggerObject(SwaggerObjectBase swaggerObjectBase)
+        {
+            var swaggerObject = swaggerObjectBase as SwaggerObject;
+            if (swaggerObject != null)
+            {
+                return swaggerObject;
+            }
+
+            var swaggerReferenceObject = swaggerObjectBase as SwaggerReferenceObject;
+            if (swaggerReferenceObject != null)
+            {
+                return swaggerReferenceObject.Reference;
+            }
+
+            throw new ArgumentException($"When resolving reference for {nameof(SwaggerReferenceObject)}, only support {nameof(SwaggerObject)} and {nameof(SwaggerReferenceObject)} as parameter.");
         }
 
         private static string GetLocation(JToken token)
@@ -184,7 +252,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                 state.WriteTo(sb);
             }
 
-            return "#" + sb.ToString();
+            return sb.ToString();
         }
 
         private class JsonIndexLocation : IJsonLocation
@@ -213,17 +281,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
             public void WriteTo(StringBuilder sb)
             {
                 sb.Append('/');
-                sb.Append(EscapeReference(_propertyName));
-            }
-
-            /// <summary>
-            /// Reverse to reference unescape described in http://tools.ietf.org/html/rfc6901#section-4
-            /// </summary>
-            /// <param name="reference"></param>
-            /// <returns></returns>
-            private static string EscapeReference(string reference)
-            {
-                return Uri.EscapeDataString(reference.Replace("~", "~0").Replace("/", "~1"));
+                sb.Append(RestApiHelper.FormatDefinitionSinglePath(_propertyName));
             }
         }
 

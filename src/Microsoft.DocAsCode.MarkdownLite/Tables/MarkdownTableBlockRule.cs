@@ -20,22 +20,45 @@ namespace Microsoft.DocAsCode.MarkdownLite
             {
                 return null;
             }
-            var sourceInfo = context.Consume(match.Length);
             var header = match.Groups[1].Value.ReplaceRegex(Regexes.Lexers.UselessTableHeader, string.Empty).SplitRegex(Regexes.Lexers.TableSplitter);
             var align = ParseAligns(match.Groups[2].Value.ReplaceRegex(Regexes.Lexers.UselessTableAlign, string.Empty).SplitRegex(Regexes.Lexers.TableSplitter));
-            var cells = match.Groups[3].Value.ReplaceRegex(Regexes.Lexers.UselessGfmTableCell, string.Empty).Split('\n').Select(x => new string[] { x }).ToArray();
-            for (int i = 0; i < cells.Length; i++)
+            if (header.Length > align.Length)
             {
-                cells[i] = cells[i][0]
+                return null;
+            }
+            var sourceInfo = context.Consume(match.Length);
+
+            var rows = match.Groups[3].Value.ReplaceRegex(Regexes.Lexers.UselessGfmTableCell, string.Empty).Split('\n').Select(x => x).ToArray();
+            var cells = new string[rows.Length][];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var columns = rows[i]
                   .ReplaceRegex(Regexes.Lexers.EmptyGfmTableCell, string.Empty)
                   .SplitRegex(Regexes.Lexers.TableSplitter);
-
-                var cellList = cells[i].ToList();
-                while (cellList.Count < header.Length)
+                if (columns.Length == header.Length)
                 {
-                    cellList.Add(string.Empty);
+                    cells[i] = columns;
                 }
-                cells[i] = cellList.ToArray();
+                else if (columns.Length < header.Length)
+                {
+                    cells[i] = new string[header.Length];
+                    for (int j = 0; j < columns.Length; j++)
+                    {
+                        cells[i][j] = columns[j];
+                    }
+                    for (int j = columns.Length; j < cells[i].Length; j++)
+                    {
+                        cells[i][j] = string.Empty;
+                    }
+                }
+                else // columns.Length > header.Length
+                {
+                    cells[i] = new string[header.Length];
+                    for (int j = 0; j < header.Length; j++)
+                    {
+                        cells[i][j] = columns[j];
+                    }
+                }
             }
 
             return new TwoPhaseBlockToken(
@@ -46,11 +69,15 @@ namespace Microsoft.DocAsCode.MarkdownLite
                     t.Rule,
                     t.Context,
                     (from text in header
-                     select p.TokenizeInline(t.SourceInfo.Copy(text))).ToImmutableArray(),
+                     let si = t.SourceInfo.Copy(text)
+                     select new MarkdownTableItemBlockToken(t.Rule, t.Context, p.TokenizeInline(si), si)).ToImmutableArray(),
                     align.ToImmutableArray(),
-                    (from row in cells
-                     select (from col in row
-                             select p.TokenizeInline(t.SourceInfo.Copy(col))).ToImmutableArray()).ToImmutableArray(),
+                    cells.Select(
+                        (row, index) =>
+                            (from col in row
+                             let si = t.SourceInfo.Copy(col, index + 2)
+                             select new MarkdownTableItemBlockToken(t.Rule, t.Context, p.TokenizeInline(si), si)).ToImmutableArray()
+                    ).ToImmutableArray(),
                     t.SourceInfo));
         }
 

@@ -26,32 +26,25 @@ namespace Microsoft.DocAsCode.MarkdownLite.Tests
 <thead>
 <tr>
 <th></th>
-<th></th>
 <th>Header1</th>
 <th>Header2</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td></td>
 <td>Single backticks</td>
 <td><code>&#39;Isn&#39;t this fun?&#39;</code></td>
 <td>&#39;Isn&#39;t this fun?&#39;</td>
-<td></td>
 </tr>
 <tr>
-<td></td>
 <td>Quotes</td>
 <td><code>&quot;Isn&#39;t this fun?&quot;</code></td>
 <td>&quot;Isn&#39;t this fun?&quot;</td>
-<td></td>
 </tr>
 <tr>
-<td></td>
 <td>Dashes</td>
 <td><code>-- is en-dash, --- is em-dash</code></td>
 <td>-- is en-dash, --- is em-dash</td>
-<td></td>
 </tr>
 </tbody>
 </table>
@@ -205,14 +198,15 @@ c
 <pre><code>c
 </code></pre>")]
         [InlineData(@"* First
+
   |  | Header1 | Header2 |
   ------- | ------- | --------
   | Row1 | Cell11 | Cell12 |
 * Second", @"<ul>
-<li>First<table>
+<li><p>First</p>
+<table>
 <thead>
 <tr>
-<th></th>
 <th></th>
 <th>Header1</th>
 <th>Header2</th>
@@ -220,11 +214,9 @@ c
 </thead>
 <tbody>
 <tr>
-<td></td>
 <td>Row1</td>
 <td>Cell11</td>
 <td>Cell12</td>
-<td></td>
 </tr>
 </tbody>
 </table>
@@ -243,18 +235,15 @@ c
 <thead>
 <tr>
 <th></th>
-<th></th>
 <th>Header1</th>
 <th>Header2</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td></td>
 <td>Row1</td>
 <td>Cell11</td>
 <td>Cell12</td>
-<td></td>
 </tr>
 </tbody>
 </table>
@@ -347,12 +336,23 @@ break list!
 </ol>
 ")]
         [InlineData(@"1. some text
+
+  ```
+  --
+  ```",
+            @"<ol>
+<li><p>some text</p>
+<pre><code>--
+</code></pre></li>
+</ol>
+")]
+        [InlineData(@"1. some text
  ```
  --
  ```",
             @"<ol>
-<li>some text<pre><code>--
-</code></pre></li>
+<li>some text
+<code>--</code></li>
 </ol>
 ")]
         [InlineData(
@@ -432,6 +432,80 @@ aaa",
             @"<!--aaa-->
 <p>aaa</p>
 ")]
+        [InlineData(
+            @"[a\](b)",
+            @"<p>[a](b)</p>
+")]
+        [InlineData(
+            @"[a](b\)",
+            @"<p>[a](b)</p>
+")]
+        [InlineData(
+            @"[a\\](b)",
+            @"<p><a href=""b"">a\</a></p>
+")]
+        [InlineData(
+            @"[a](b\\)",
+            @"<p><a href=""b\"">a</a></p>
+")]
+        [InlineData(
+            @"<!--a-->[b](c)<!--d-->e
+<!--f-->",
+            @"<p><!--a--><a href=""c"">b</a><!--d-->e
+<!--f--></p>
+")]
+        [InlineData(
+            @"aabbcc:smile:ddee",
+            @"<p>aabbcc<span class=""emoji"" shortCode=""smile"">😄</span>ddee</p>
+")]
+        [InlineData(
+            @"aabbcc:not_emoji:ddee",
+            @"<p>aabbcc:not_emoji:ddee</p>
+")]
+        [InlineData(
+            @"# Ice cube",
+            @"<h1 id=""ice-cube"">Ice cube</h1>
+")]
+        [InlineData(
+            @"# Eazy-E",
+            @"<h1 id=""eazy-e"">Eazy-E</h1>
+")]
+        [InlineData(
+            @"# Straight Outta Compton
+# Dopeman
+# Express Yourself
+# Dopeman",
+            @"<h1 id=""straight-outta-compton"">Straight Outta Compton</h1>
+<h1 id=""dopeman"">Dopeman</h1>
+<h1 id=""express-yourself"">Express Yourself</h1>
+<h1 id=""dopeman-1"">Dopeman</h1>
+")]
+        [InlineData(
+            @"# ""Funky President"" by James Brown",
+            @"<h1 id=""funky-president-by-james-brown"">&quot;Funky President&quot; by James Brown</h1>
+")]
+        [InlineData(
+            @"# 中文",
+            @"<h1 id=""中文"">中文</h1>
+")]
+        [InlineData(
+            @"# sān　空格　 sān",
+            @"<h1 id=""sān空格-sān"">sān　空格　 sān</h1>
+")]
+        [InlineData(
+            @"# a-1
+# a
+# a",
+            @"<h1 id=""a-1"">a-1</h1>
+<h1 id=""a"">a</h1>
+<h1 id=""a-1-1"">a</h1>
+")]
+        [InlineData(
+            @"# 测试。用例
+# 测试。用例",
+            @"<h1 id=""测试用例"">测试。用例</h1>
+<h1 id=""测试用例-1"">测试。用例</h1>
+")]
         #endregion
         public void TestGfmInGeneral(string source, string expected)
         {
@@ -495,6 +569,48 @@ aaa",
 
         [Fact]
         [Trait("Related", "Markdown")]
+        public void TestTable_WithEmptyCell2()
+        {
+            // 1. Prepare data
+            var source = @"  A |  B | C 
+|:-------|-------|-------| 
+| A1 | B1
+| A2 | |  C2 | D2 | E2
+| A3 | B3 |
+";
+
+            var expected = @"<table>
+<thead>
+<tr>
+<th style=""text-align:left"">A</th>
+<th>B</th>
+<th>C</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style=""text-align:left"">A1</td>
+<td>B1</td>
+<td></td>
+</tr>
+<tr>
+<td style=""text-align:left"">A2</td>
+<td></td>
+<td>C2</td>
+</tr>
+<tr>
+<td style=""text-align:left"">A3</td>
+<td>B3</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+";
+            TestGfmInGeneral(source, expected);
+        }
+
+        [Fact]
+        [Trait("Related", "Markdown")]
         public void TestGfmBuilder_CommentRuleShouldBeforeAutoLink()
         {
             var source = @"<!--
@@ -547,6 +663,28 @@ https://en.wikipedia.org/wiki/Draft:Microsoft_SQL_Server_Libraries/Drivers
 </tr>
 </tbody>
 </table>
+";
+            TestGfmInGeneral(source, expected);
+        }
+
+        [Fact]
+        [Trait("Related", "Markdown")]
+        public void TestGfmImageLink_WithSpecialCharactorsInAltText()
+        {
+            var source = @"![This is image alt text with quotation ' and double quotation ""hello"" world](girl.png)";
+
+            var expected = @"<p><img src=""girl.png"" alt=""This is image alt text with quotation &#39; and double quotation &quot;hello&quot; world""></p>
+";
+            TestGfmInGeneral(source, expected);
+        }
+
+        [Fact]
+        [Trait("Related", "Markdown")]
+        public void TestGfmLink_WithSpecialCharactorsInTitle()
+        {
+            var source = @"[This is link text with quotation ' and double quotation ""hello"" world](girl.png ""title is ""hello"" world."")";
+
+            var expected = @"<p><a href=""girl.png"" title=""title is &quot;hello&quot; world."">This is link text with quotation &#39; and double quotation &quot;hello&quot; world</a></p>
 ";
             TestGfmInGeneral(source, expected);
         }

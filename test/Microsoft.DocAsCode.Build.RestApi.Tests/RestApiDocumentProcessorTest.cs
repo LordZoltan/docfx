@@ -12,8 +12,8 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
     using Xunit;
 
     using Microsoft.DocAsCode.Build.Engine;
-    using Microsoft.DocAsCode.Build.RestApi.ViewModels;
     using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.DataContracts.RestApi;
     using Microsoft.DocAsCode.Plugins;
     using Microsoft.DocAsCode.Utility;
     using Microsoft.DocAsCode.Tests.Common;
@@ -36,8 +36,8 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
             _outputFolder = GetRandomFolder();
             _inputFolder = GetRandomFolder();
             _templateFolder = GetRandomFolder();
-            _defaultFiles = new FileCollection(Environment.CurrentDirectory);
-            _defaultFiles.Add(DocumentType.Article, new[] { "TestData/contacts_swagger2.json" }, p => (((RelativePath)p) - (RelativePath)"TestData/").ToString());
+            _defaultFiles = new FileCollection(Directory.GetCurrentDirectory());
+            _defaultFiles.Add(DocumentType.Article, new[] { "TestData/contacts.json" }, "TestData/", null);
             _applyTemplateSettings = new ApplyTemplateSettings(_inputFolder, _outputFolder);
             _applyTemplateSettings.RawModelExportSettings.Export = true;
         }
@@ -53,39 +53,74 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
             var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
             Assert.Equal("graph.windows.net/myorganization/Contacts/1.0", model.Uid);
             Assert.Equal("graph_windows_net_myorganization_Contacts_1_0", model.HtmlId);
-            Assert.Equal(9, model.Children.Count);
+            Assert.Equal(10, model.Children.Count);
             Assert.Equal("Hello world!", model.Metadata["meta"]);
-            var item1 = model.Children[0];
-            Assert.Equal("graph.windows.net/myorganization/Contacts/1.0/get contacts", item1.Uid);
-            Assert.Equal("<p>You can get a collection of contacts from your tenant.</p>\n", item1.Summary);
-            Assert.Equal(1, item1.Parameters.Count);
-            Assert.Equal("1.6", item1.Parameters[0].Metadata["default"]);
-            Assert.Equal(1, item1.Responses.Count);
-            Assert.Equal("200", item1.Responses[0].HttpStatusCode);
+
+            // Verify $ref in path
+            var item0 = model.Children[0];
+            Assert.Equal("graph.windows.net/myorganization/Contacts/1.0/get contacts", item0.Uid);
+            Assert.Equal("<p sourcefile=\"TestData/contacts.json\" sourcestartlinenumber=\"1\" sourceendlinenumber=\"1\">You can get a collection of contacts from your tenant.</p>\n", item0.Summary);
+            Assert.Equal(1, item0.Parameters.Count);
+            Assert.Equal("1.6", item0.Parameters[0].Metadata["default"]);
+            Assert.Equal(1, item0.Responses.Count);
+            Assert.Equal("200", item0.Responses[0].HttpStatusCode);
 
             // Verify tags of child
-            var item1Tag = (JArray)(item1.Metadata["tags"]);
-            Assert.NotNull(item1Tag);
-            Assert.Equal("contacts", item1Tag[0]);
-            var item2 = model.Children[1];
-            var item2Tag = (JArray)(item2.Metadata["tags"]);
+            var item0Tag = (JArray)(item0.Metadata["tags"]);
+            Assert.NotNull(item0Tag);
+            Assert.Equal("contacts", item0Tag[0]);
+            var item1 = model.Children[1];
+            var item2Tag = (JArray)(item1.Metadata["tags"]);
             Assert.NotNull(item2Tag);
             Assert.Equal("contacts", item2Tag[0]);
             Assert.Equal("pet store", item2Tag[1]);
 
             // Verify tags of root
             Assert.Equal(3, model.Tags.Count);
-            var tag1 = model.Tags[0];
-            Assert.Equal("contact", tag1.Name);
-            Assert.Equal("<p>Everything about the <strong>contacts</strong></p>\n", tag1.Description);
-            Assert.Equal("contact-bookmark", tag1.HtmlId);
-            Assert.Equal(1, tag1.Metadata.Count);
-            var externalDocs = (JObject)tag1.Metadata["externalDocs"];
+            var tag0 = model.Tags[0];
+            Assert.Equal("contact", tag0.Name);
+            Assert.Equal("<p sourcefile=\"TestData/contacts.json\" sourcestartlinenumber=\"1\" sourceendlinenumber=\"1\">Everything about the <strong>contacts</strong></p>\n", tag0.Description);
+            Assert.Equal("contact-bookmark", tag0.HtmlId);
+            Assert.Equal(1, tag0.Metadata.Count);
+            var externalDocs = (JObject)tag0.Metadata["externalDocs"];
             Assert.NotNull(externalDocs);
             Assert.Equal("Find out more", externalDocs["description"]);
             Assert.Equal("http://swagger.io", externalDocs["url"]);
-            var tag2 = model.Tags[1];
-            Assert.Equal("pet_store", tag2.HtmlId);
+            var tag1 = model.Tags[1];
+            Assert.Equal("pet_store", tag1.HtmlId);
+
+            // Verify path parameters
+            // Path parameter applicable for get operation
+            Assert.Equal(2, item1.Parameters.Count);
+            Assert.Equal("object_id", item1.Parameters[0].Metadata["name"]);
+            Assert.Equal("api-version", item1.Parameters[1].Metadata["name"]);
+            Assert.Equal(true, item1.Parameters[1].Metadata["required"]);
+
+            // Override ""api-version" parameters by $ref for patch operation
+            var item2 = model.Children[2];
+            Assert.Equal(3, item2.Parameters.Count);
+            Assert.Equal("object_id", item2.Parameters[0].Metadata["name"]);
+            Assert.Equal("api-version", item2.Parameters[1].Metadata["name"]);
+            Assert.Equal(false, item2.Parameters[1].Metadata["required"]);
+
+            // Override ""api-version" parameters by self definition for delete operation
+            var item3 = model.Children[3];
+            Assert.Equal(2, item3.Parameters.Count);
+            Assert.Equal("object_id", item3.Parameters[0].Metadata["name"]);
+            Assert.Equal("api-version", item3.Parameters[1].Metadata["name"]);
+            Assert.Equal(false, item3.Parameters[1].Metadata["required"]);
+
+            // When operation parameters is not set, inherit from th parameters for post operation
+            var item4 = model.Children[4];
+            Assert.Equal(1, item4.Parameters.Count);
+            Assert.Equal("api-version", item4.Parameters[0].Metadata["name"]);
+            Assert.Equal(true, item4.Parameters[0].Metadata["required"]);
+
+            // When 'definitions' has direct child with $ref defined, should resolve it
+            var item5 = model.Children[6];
+            var parameter2 = (JObject)item5.Parameters[2].Metadata["schema"];
+            Assert.Equal("string", parameter2["type"]);
+            Assert.Equal("uri", parameter2["format"]);
         }
 
         [Fact]
@@ -100,11 +135,11 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
                 Assert.True(File.Exists(outputRawModelPath));
                 var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
                 var tag1 = model.Tags[0];
-                Assert.Equal("<p>Overwrite <em>description</em> content</p>\n", tag1.Description);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.tags.md\" sourcestartlinenumber=\"6\" sourceendlinenumber=\"6\">Overwrite <em>description</em> content</p>\n", tag1.Description);
                 Assert.Null(tag1.Conceptual);
                 var tag2 = model.Tags[1];
-                Assert.Equal("<p>Access to Petstore orders</p>\n", tag2.Description);
-                Assert.Equal("<p>Overwrite <strong>conceptual</strong> content</p>\n", tag2.Conceptual);
+                Assert.Equal("<p sourcefile=\"TestData/contacts.json\" sourcestartlinenumber=\"1\" sourceendlinenumber=\"1\">Access to Petstore orders</p>\n", tag2.Description);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.tags.md\" sourcestartlinenumber=\"12\" sourceendlinenumber=\"12\">Overwrite <strong>conceptual</strong> content</p>\n", tag2.Conceptual);
             }
         }
 
@@ -119,8 +154,8 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
                 var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension("contacts.json", RawModelFileExtension));
                 Assert.True(File.Exists(outputRawModelPath));
                 var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
-                Assert.Equal("<p>Overwrite summary</p>\n", model.Summary);
-                Assert.Equal("<p>Overwrite content</p>\n", model.Conceptual);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.default.md\" sourcestartlinenumber=\"1\" sourceendlinenumber=\"1\">Overwrite summary</p>\n", model.Summary);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.default.md\" sourcestartlinenumber=\"6\" sourceendlinenumber=\"6\">Overwrite content</p>\n", model.Conceptual);
             }
         }
 
@@ -132,8 +167,8 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
             BuildDocument(files);
             var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension("contacts.json", RawModelFileExtension));
             Assert.True(File.Exists(outputRawModelPath));
-                var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
-            Assert.Equal("<p>Overwrite content</p>\n", model.Summary);
+            var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
+            Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.simple.md\" sourcestartlinenumber=\"6\" sourceendlinenumber=\"6\">Overwrite content</p>\n", model.Summary);
             Assert.Null(model.Conceptual);
         }
 
@@ -147,7 +182,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
                 var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension("contacts.json", RawModelFileExtension));
                 Assert.True(File.Exists(outputRawModelPath));
                 var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
-                Assert.Equal("<p>Overwrite content</p>\n", model.Metadata["not_defined_property"]);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.not.predefined.md\" sourcestartlinenumber=\"6\" sourceendlinenumber=\"6\">Overwrite content</p>\n", model.Metadata["not_defined_property"]);
                 Assert.Null(model.Conceptual);
             }
         }
@@ -186,9 +221,9 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
                 Assert.True(File.Exists(outputRawModelPath));
                 var model = JsonUtility.Deserialize<RestApiRootItemViewModel>(outputRawModelPath);
                 Assert.Equal("graph_windows_net_myorganization_Contacts_1_0", model.HtmlId);
-                Assert.Equal("<p>Overwrite content1</p>\n", model.Conceptual);
-                Assert.Equal("<p>Overwrite &quot;content2&quot;</p>\n", model.Summary);
-                Assert.Equal("<p>Overwrite &#39;content3&#39;</p>\n", model.Metadata["not_defined_property"]);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.multi.uid.md\" sourcestartlinenumber=\"6\" sourceendlinenumber=\"6\">Overwrite content1</p>\n", model.Conceptual);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.multi.uid.md\" sourcestartlinenumber=\"13\" sourceendlinenumber=\"13\">Overwrite &quot;content2&quot;</p>\n", model.Summary);
+                Assert.Equal("<p sourcefile=\"TestData/overwrite/rest.overwrite.multi.uid.md\" sourcestartlinenumber=\"20\" sourceendlinenumber=\"20\">Overwrite &#39;content3&#39;</p>\n", model.Metadata["not_defined_property"]);
             }
         }
 
@@ -205,13 +240,13 @@ namespace Microsoft.DocAsCode.Build.RestApi.Tests
                 }.ToImmutableDictionary()
             };
 
-            using (var builder = new DocumentBuilder(LoadAssemblies()))
+            using (var builder = new DocumentBuilder(LoadAssemblies(), ImmutableArray<string>.Empty, null))
             {
                 builder.Build(parameters);
             }
         }
 
-        private IEnumerable<System.Reflection.Assembly> LoadAssemblies()
+        private static IEnumerable<System.Reflection.Assembly> LoadAssemblies()
         {
             yield return typeof(RestApiDocumentProcessor).Assembly;
         }

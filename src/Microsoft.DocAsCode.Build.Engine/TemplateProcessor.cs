@@ -20,9 +20,9 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         private readonly TemplateCollection _templateCollection;
 
-        public static readonly TemplateProcessor DefaultProcessor = new TemplateProcessor(new EmptyResourceCollection(), 1);
+        public static readonly TemplateProcessor DefaultProcessor = new TemplateProcessor(new EmptyResourceCollection(), null, 1);
 
-        public IDictionary<string, object> DefaultGlobalVariables { get; }
+        public IDictionary<string, string> Tokens { get; }
 
         /// <summary>
         /// TemplateName can be either file or folder
@@ -31,7 +31,7 @@ namespace Microsoft.DocAsCode.Build.Engine
         /// </summary>
         /// <param name="templateName"></param>
         /// <param name="resourceProvider"></param>
-        public TemplateProcessor(ResourceCollection resourceProvider, int maxParallelism = 0)
+        public TemplateProcessor(ResourceCollection resourceProvider, DocumentBuildContext context, int maxParallelism = 0)
         {
             if (maxParallelism <= 0)
             {
@@ -39,8 +39,8 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
 
             _resourceProvider = resourceProvider;
-            _templateCollection = new TemplateCollection(resourceProvider, maxParallelism);
-            DefaultGlobalVariables = LoadGlobalJson(resourceProvider) ?? new Dictionary<string, object>();
+            _templateCollection = new TemplateCollection(resourceProvider, context, maxParallelism);
+            Tokens = LoadTokenJson(resourceProvider) ?? new Dictionary<string, string>();
         }
 
         public TemplateBundle GetTemplateBundle(string documentType)
@@ -63,13 +63,13 @@ namespace Microsoft.DocAsCode.Build.Engine
             return true;
         }
 
-        public List<TemplateManifestItem> Process(List<ManifestItem> manifest, DocumentBuildContext context, ApplyTemplateSettings settings, IDictionary<string, object> globals = null)
+        internal List<ManifestItem> Process(List<InternalManifestItem> manifest, DocumentBuildContext context, ApplyTemplateSettings settings, IDictionary<string, object> globals = null)
         {
-            using (new LoggerPhaseScope("Apply Templates"))
+            using (new LoggerPhaseScope("Apply Templates", true))
             {
                 if (globals == null)
                 {
-                    globals = DefaultGlobalVariables;
+                    globals = Tokens.ToDictionary(pair => pair.Key, pair => (object)pair.Value);
                 }
 
                 var documentTypes = manifest.Select(s => s.DocumentType).Distinct();
@@ -90,10 +90,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                     Logger.LogInfo("Dryrun, no template will be applied to the documents.");
                 }
 
-                var outputDirectory = context.BuildOutputFolder;
-
                 var templateManifest = ProcessCore(manifest, context, settings, globals);
-                SaveManifest(templateManifest, outputDirectory, context);
                 return templateManifest;
             }
         }
@@ -155,9 +152,9 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
         }
 
-        private List<TemplateManifestItem> ProcessCore(List<ManifestItem> items, DocumentBuildContext context, ApplyTemplateSettings settings, IDictionary<string, object> globals)
+        private List<ManifestItem> ProcessCore(List<InternalManifestItem> items, DocumentBuildContext context, ApplyTemplateSettings settings, IDictionary<string, object> globals)
         {
-            var manifest = new ConcurrentBag<TemplateManifestItem>();
+            var manifest = new ConcurrentBag<ManifestItem>();
             var systemAttributeGenerator = new SystemMetadataGenerator(context);
             var transformer = new TemplateModelTransformer(context, _templateCollection, settings, globals);
             items.RunAll(
@@ -170,64 +167,25 @@ namespace Microsoft.DocAsCode.Build.Engine
                     }
                 },
                 context.MaxParallelism);
+            return manifest.ToList();
 
-            var itemsToRemove = new List<string>();
-            foreach (var duplicates in from m in manifest
-                                       from output in m.OutputFiles.Values
-                                       group m.OriginalFile by output into g
-                                       where g.Count() > 1
-                                       select g)
+        }
+
+        private static IDictionary<string, string> LoadTokenJson(ResourceCollection resource)
+        {
+            var tokenJson = resource.GetResource("token.json");
+            if (string.IsNullOrEmpty(tokenJson))
             {
-                Logger.LogWarning($"Overwrite occurs while input files \"{string.Join(", ", duplicates)}\" writing to the same output file \"{duplicates.Key}\"");
-                itemsToRemove.AddRange(duplicates.Skip(1));
-            }
-
-            return manifest.Where(m => !itemsToRemove.Contains(m.OriginalFile)).ToList();
-        }
-
-        private static IDictionary<string, object> LoadGlobalJson(ResourceCollection resource)
-        {
-            var globalJson = resource.GetResource("global.json");
-            if (string.IsNullOrEmpty(globalJson))
-            {
-                return null;
-            }
-
-            return JsonUtility.FromJsonString<Dictionary<string, object>>(globalJson);
-        }
-
-        private static void SaveManifest(List<TemplateManifestItem> templateManifest, string outputDirectory, IDocumentBuildContext context)
-        {
-            // Save manifest from template
-            // TODO: Keep .manifest for backward-compatability, will remove next sprint
-            var manifestPath = Path.Combine(outputDirectory ?? string.Empty, Constants.ObsoleteManifestFileName);
-            JsonUtility.Serialize(manifestPath, templateManifest);
-            // Logger.LogInfo($"Manifest file saved to {manifestPath}. NOTE: This file is out-of-date and will be removed in version 1.8, if you rely on this file, please change to use {Constants.ManifestFileName} instead.");
-
-            var manifestJsonPath = Path.Combine(outputDirectory ?? string.Empty, Constants.ManifestFileName);
-
-            var toc = context.GetTocInfo();
-            var manifestObject = GenerateManifest(context, templateManifest);
-            JsonUtility.Serialize(manifestJsonPath, manifestObject);
-            Logger.LogInfo($"Manifest file saved to {manifestJsonPath}.");
-        }
-
-        private static Manifest GenerateManifest(IDocumentBuildContext context, List<TemplateManifestItem> items)
-        {
-            var toc = context.GetTocInfo();
-            var homepages = toc
-                .Where(s => !string.IsNullOrEmpty(s.Homepage))
-                .Select(s => new HomepageInfo
+                // also load `global.json` for backward compatibility
+                // TODO: remove this
+                tokenJson = resource.GetResource("global.json");
+                if (string.IsNullOrEmpty(tokenJson))
                 {
-                    Homepage = RelativePath.GetPathWithoutWorkingFolderChar(s.Homepage),
-                    TocPath = RelativePath.GetPathWithoutWorkingFolderChar(context.GetFilePath(s.TocFileKey))
-                }).ToList();
-            return new Manifest
-            {
-                Homepages = homepages,
-                Files = items,
-                XRefMap = DocumentBuilder.XRefMapFileName,
-            };
+                    return null;
+                }
+            }
+
+            return JsonUtility.FromJsonString<Dictionary<string, string>>(tokenJson);
         }
 
         public void Dispose()

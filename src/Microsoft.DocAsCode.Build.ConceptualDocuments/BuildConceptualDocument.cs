@@ -17,11 +17,12 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
     using Microsoft.DocAsCode.Utility;
 
     [Export(nameof(ConceptualDocumentProcessor), typeof(IDocumentBuildStep))]
-    public class BuildConceptualDocument : BaseDocumentBuildStep
+    public class BuildConceptualDocument : BaseDocumentBuildStep, ISupportIncrementalBuildStep
     {
         private const string ConceptualKey = Constants.PropertyName.Conceptual;
         private const string DocumentTypeKey = "documentType";
         private const int TitleThumbnailMaxLength = 30;
+
         public override string Name => nameof(BuildConceptualDocument);
 
         public override int BuildOrder => 0;
@@ -36,7 +37,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             var markdown = (string)content[ConceptualKey];
             var result = host.Markup(markdown, model.FileAndType);
 
-            var htmlInfo = SeperateHtml(result.Html);
+            var htmlInfo = SeparateHtml(result.Html);
             model.Properties.IsUserDefinedTitle = false;
             content[Constants.PropertyName.Title] = htmlInfo.Title;
             content["rawTitle"] = htmlInfo.RawTitle;
@@ -69,8 +70,10 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                     }
                 }
             }
-            model.Properties.LinkToFiles = result.LinkToFiles;
-            model.Properties.LinkToUids = result.LinkToUids;
+            model.LinkToFiles = result.LinkToFiles.ToImmutableHashSet();
+            model.LinkToUids = result.LinkToUids;
+            model.FileLinkSources = result.FileLinkSources;
+            model.UidLinkSources = result.UidLinkSources;
             model.Properties.XrefSpec = null;
             if (model.Uids.Length > 0)
             {
@@ -81,7 +84,22 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                     Href = ((RelativePath)model.File).GetPathFromWorkingFolder()
                 };
             }
+            host.ReportDependency(model, result.Dependency);
         }
+
+        #region ISupportIncrementalBuild Members
+
+        public bool CanIncrementalBuild(FileAndType fileAndType)
+        {
+            return true;
+        }
+
+        public string GetIncrementalContextHash()
+        {
+            return null;
+        }
+
+        #endregion
 
         private static string TitleThumbnail(string title, int maxLength)
         {
@@ -90,7 +108,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             return title.Substring(0, maxLength) + "...";
         }
 
-        private static HtmlInfo SeperateHtml(string contentHtml)
+        private static HtmlInfo SeparateHtml(string contentHtml)
         {
             var content = new HtmlInfo();
 
@@ -109,7 +127,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             }
             else
             {
-                content.RawTitle = "<h1></h1>";
+                content.RawTitle = string.Empty;
             }
 
             content.Content = document.DocumentNode.OuterHtml;

@@ -3,9 +3,12 @@
 
 namespace Microsoft.DocAsCode.Build.Engine
 {
+    using System.Collections.Generic;
+    using System.Collections.Immutable;
     using System.Composition;
 
     using Microsoft.DocAsCode.Dfm;
+    using Microsoft.DocAsCode.MarkdownLite;
     using Microsoft.DocAsCode.Plugins;
 
     [Export("dfm", typeof(IMarkdownServiceProvider))]
@@ -13,21 +16,44 @@ namespace Microsoft.DocAsCode.Build.Engine
     {
         public IMarkdownService CreateMarkdownService(MarkdownServiceParameters parameters)
         {
-            return new DfmService(parameters.BasePath);
+            return new DfmService(
+                parameters.BasePath,
+                parameters.TemplateDir,
+                parameters.Tokens,
+                MarkdownTokenTreeValidatorFactory.Combine(TokenTreeValidator));
         }
+
+        [ImportMany]
+        public IEnumerable<IMarkdownTokenTreeValidator> TokenTreeValidator { get; set; }
 
         private sealed class DfmService : IMarkdownService
         {
             private readonly DfmEngineBuilder _builder;
 
-            public DfmService(string baseDir)
+            private readonly ImmutableDictionary<string, string> _tokens;
+
+            public DfmService(string baseDir, string templateDir, ImmutableDictionary<string, string> tokens, IMarkdownTokenTreeValidator tokenTreeValidator)
             {
-                _builder = DocfxFlavoredMarked.CreateBuilder(baseDir);
+                var options = DocfxFlavoredMarked.CreateDefaultOptions();
+                options.ShouldExportSourceInfo = true;
+                _builder = DocfxFlavoredMarked.CreateBuilder(baseDir, templateDir, options);
+                _builder.TokenTreeValidator = tokenTreeValidator;
+                _tokens = tokens;
             }
 
-            public string Markup(string src, string path)
+            public MarkupResult Markup(string src, string path)
             {
-                return _builder.CreateDfmEngine(DocfxFlavoredMarked.Renderer).Markup(src, path);
+                var dependency = new HashSet<string>();
+                var html = _builder.CreateDfmEngine(new DfmRenderer() { Tokens = _tokens }).Markup(src, path, dependency);
+                var result = new MarkupResult
+                {
+                    Html = html,
+                };
+                if (dependency.Count > 0)
+                {
+                    result.Dependency = dependency.ToImmutableArray();
+                }
+                return result;
             }
         }
     }

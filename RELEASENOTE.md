@@ -1,11 +1,84 @@
-Version Notes (Current Version: v2.1)
+Version Notes (Current Version: v2.5)
 =======================================
-v2.1(Pre-Release)
+v2.5(Pre-Release)
+-----------
+
+v2.4
+-----------
+1.  Update default template theme.
+2.  Fix resolving properties for swagger.
+3.  Fix bugs in markdown.
+    1.  Fix id in title (following GitHub rule).
+    2.  Fix strikeout not work in dfm.
+    3.  Fix tight list item behavior.
+    4.  Fix line number in table.
+
+v2.3
+-----------
+1.  Support emoji in markdown content.
+2.  Upgrade yamldotnet to 3.9.
+3.  Refine markdown validation.
+4.  Support separated meta json file.
+5.  Change `hightlight.js` theme to `github-gist`.
+6.  Support '.json' as supported swagger file extension.
+7.  Support `topicHref` and `tocHref` to specify homepage toc.
+8.  Support customized contribute repository and branch for "Improve this Doc" button. (https://github.com/dotnet/docfx/issues/482)
+9.  Improve message for `docfx.exe template` command.
+
+v2.2.2
+-----------
+1. Fix bug in `.manifest` file.
+
+v2.2.1
+-----------
+1. Fix bug when metadata incremental check.
+2. Move post process out of DocumentBuilder.
+
+v2.2
+-----------
+1.  Support multi-version site. (https://github.com/dotnet/docfx/issues/396)
+2.  Support loop reference for Swagger Rest API. (https://github.com/dotnet/docfx/issues/223)
+3.  Support plug-in for post processor.
+4.  Support href for see/seealso tags.
+5.  Improve API reference documentation of namespace and enum.
+6.  Update prerequisite to build docfx.
+7.  Update manifest schema.
+8.  Add chocolatey support in CI script.
+9.  Provide with options in build.cmd.
+10.  Bug fixes:
+    1. syntax for static class is incorrect.
+    2. improve warning message about global namespace class. (https://github.com/dotnet/docfx/issues/417)
+    3. fix normalizexml bug for empty `<code></code>` in tripleslashcomment.
+
+v2.1
 -----------
 1.  Support for xref zip file in relative path.
 2.  Support anchor in toc file.
 3.  Support plug-in for validating markdown input metadata.
 4.  Add output file md5 hashes.
+5.  **Breaking Url** Rename generic type file name in metadata step
+
+    E.g. `System.Func<T>` will generate `System.Func-1.yml` instead of ``System.Func`1.yml``,
+    and after build the url will be `System.Func-1.html` instead of `System.Func%601.html`.
+
+    To keep old behavior, please add following option in metadata part in docfx.json:
+    ```json
+    "useCompatibilityFileName": true
+    ```
+6.  Display extension methods in API reference documentation
+7.  Provide with option `_displayLangs` in docfx.json to choose which language version you want to show.
+8.  Support more Swagger syntax:
+    - Support `allOf`. (https://github.com/dotnet/docfx/issues/360)
+    - Support $ref with `[` and `]` in json pointer. (https://github.com/dotnet/docfx/issues/359)
+    - Support `parameters` applicable for all the operations under `path`. (https://github.com/dotnet/docfx/issues/358)
+
+v2.0.2
+-----------
+1. Support localization tokens in DFM.
+
+v2.0.1
+-----------
+1. Fix bug that file links can't be resolved in overwrite file
 
 v2.0
 -----------
@@ -14,8 +87,8 @@ v2.0
 3.  Provide more information for API reference documentation
     1. display inherited members
     2. display overridden members
-    3. display implemented interface 
-    4. seperate category for Explicit Interface Implementation
+    3. display implemented interface
+    4. separate category for Explicit Interface Implementation
 4.  Rest api - Enable **Tag** in Swagger file to organize the **API**s.
 
 v1.9
@@ -26,7 +99,7 @@ v1.9
 
     ```js
     exports.transform = function (model){
-        // transform the model 
+        // transform the model
         return model;
     }
     ```
@@ -227,3 +300,4 @@ v0.3
 -------------
 1. Support Static Website Templates
 2. Schema change to docfx.json
+

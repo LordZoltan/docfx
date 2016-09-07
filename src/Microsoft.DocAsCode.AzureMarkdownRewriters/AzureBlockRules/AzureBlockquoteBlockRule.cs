@@ -3,11 +3,17 @@
 
 namespace Microsoft.DocAsCode.AzureMarkdownRewriters
 {
+    using System.Text.RegularExpressions;
+
     using Microsoft.DocAsCode.MarkdownLite;
 
     public class AzureBlockquoteBlockRule : MarkdownBlockquoteBlockRule
     {
         public override string Name => "AzureBlockquote";
+
+        public static readonly Regex _azureLeadingBlankRegex = new Regex(@"^ *>? *", RegexOptions.Multiline | RegexOptions.Compiled);
+
+        public override Regex LeadingBlockquote => _azureLeadingBlankRegex;
 
         public override IMarkdownToken TryMatch(IMarkdownParser engine, IMarkdownParsingContext context)
         {
@@ -17,11 +23,19 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                 return null;
             }
             var sourceInfo = context.Consume(match.Length);
-            var capStr = LeadingBlockquote.Replace(match.Value, string.Empty);
-            var c = engine.SwitchContext(MarkdownBlockContext.IsBlockQuote, true);
-            var tokens = engine.Tokenize(sourceInfo.Copy(capStr));
-            engine.SwitchContext(c);
-            return new AzureBlockquoteBlockToken(this, engine.Context, tokens, sourceInfo);
+            return new TwoPhaseBlockToken(
+                this,
+                engine.Context,
+                sourceInfo,
+                (p, t) =>
+                {
+                    var capStr = LeadingBlockquote.Replace(t.SourceInfo.Markdown, string.Empty);
+                    var c = p.SwitchContext(MarkdownBlockContext.IsBlockQuote, true);
+                    var tokens = p.Tokenize(t.SourceInfo.Copy(capStr));
+                    tokens = TokenHelper.ParseInlineToken(p, t.Rule, tokens, true, t.SourceInfo);
+                    p.SwitchContext(c);
+                    return new AzureBlockquoteBlockToken(this, t.Context, tokens, t.SourceInfo);
+                });
         }
     }
 }

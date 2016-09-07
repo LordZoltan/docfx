@@ -20,11 +20,20 @@ var files = [
     "*.tmpl",
     "favicon.ico",
     "logo.svg",
-    "global.json",
+    "token.json",
     "search-stopwords.json"];
 
 var pack = {
+    "common": [
+        {
+            "files": files,
+        }
+    ],
     "default": [
+        {
+            "files": files,
+            "cwd": "common",
+        },
         {
             "files": files,
         }
@@ -37,6 +46,10 @@ var pack = {
     "iframe.html": [
         {
             "files": files,
+            "cwd": "common",
+        },
+        {
+            "files": files,
             "cwd": "default",
         },
         {
@@ -44,6 +57,10 @@ var pack = {
         }
     ],
     "statictoc": [
+        {
+            "files": files,
+            "cwd": "common",
+        },
         {
             "files": [
                 "fonts/*",
@@ -53,111 +70,13 @@ var pack = {
                 "*.tmpl",
                 "favicon.ico",
                 "logo.svg",
-                "global.json",
+                "token.json",
                 "!toc.html.*",
-                ],
+            ],
             "cwd": "default",
         },
         {
             "files": files, // Overrides the former one if file name is the same
-        }
-    ],
-    "msdn.html": [
-        {
-            "files": [
-                "common.js",
-                "ManagedReference.common.js",
-                "ManagedReference.html.primary.js",
-                "partials/classSubtitle.tmpl.partial",
-                "partials/namespaceSubtitle.tmpl.partial",
-            ],
-            "cwd": "default",
-        },
-        {
-            "files": [
-                "op.common.js",
-                "partials/title.tmpl.partial",
-                "partials/namespace.tmpl.partial",
-                "global.json",
-            ],
-            "cwd": "op.html",
-        },
-        {
-            "files": files
-        }
-    ],
-    "op.html": [
-        {
-            "files": [
-                "common.js",
-                "ManagedReference.common.js",
-                "ManagedReference.html.primary.js",
-                "partials/classSubtitle.tmpl.partial",
-                "partials/namespaceSubtitle.tmpl.partial",
-            ],
-            "cwd": "default",
-        },
-        {
-            "files": [
-                "ManagedReference.mta.json.tmpl",
-                "conceptual.mta.json.tmpl",
-                "Resource.mta.json.aux.tmpl",
-            ],
-            "cwd": "docs.html",
-        },
-        {
-            "files": files
-        }
-    ],
-    "vs.html": [
-        {
-            "files": [
-                "common.js",
-                "ManagedReference.common.js",
-                "ManagedReference.html.primary.js",
-                "partials/classSubtitle.tmpl.partial",
-                "partials/namespaceSubtitle.tmpl.partial",
-            ],
-            "cwd": "default",
-        },
-        {
-            "files": [
-                "op.common.js",
-                "partials/title.tmpl.partial",
-                "partials/namespace.tmpl.partial",
-                "global.json",
-            ],
-            "cwd": "op.html",
-        },
-        {
-            "files": files,
-            "cwd": "msdn.html",
-        },
-        {
-            "files": files
-        }
-    ],
-    "docs.html": [
-         {
-            "files": [
-                "common.js",
-                "ManagedReference.common.js",
-                "RestApi.common.js",
-                "partials/classSubtitle.tmpl.partial",
-                "partials/namespaceSubtitle.tmpl.partial",
-                "RestApi.html.primary.js",
-            ],
-            "cwd": "default",
-        },
-        {
-            "files": [
-                "global.json",
-                "op.common.js",
-            ],
-            "cwd": "op.html",
-        },
-        {
-            "files": files
         }
     ]
 };
@@ -204,7 +123,7 @@ gulp.task('pack', function () {
             .pipe(uniqueFiles())
             .pipe(zip(filename))
             .pipe(gulp.dest(dirname))
-        ;
+            ;
     }
 
     function getStream(file, key) {

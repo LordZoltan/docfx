@@ -42,7 +42,7 @@ namespace Microsoft.DocAsCode.Build.Engine
         /// </summary>
         /// <param name="item"></param>
         /// <returns></returns>
-        public TemplateManifestItem Transform(ManifestItem item)
+        internal ManifestItem Transform(InternalManifestItem item)
         {
             if (item.Model == null || item.Model.Content == null) throw new ArgumentNullException("Content for item.Model should not be null!");
             var model = ConvertObjectToDictionary(item.Model.Content);
@@ -52,21 +52,25 @@ namespace Microsoft.DocAsCode.Build.Engine
                 ExportModel(model, item.FileWithoutExtension, _settings.RawModelExportSettings);
             }
 
-            var manifestItem = new TemplateManifestItem
+            var manifestItem = new ManifestItem
             {
                 DocumentType = item.DocumentType,
-                OriginalFile = item.LocalPathFromRepoRoot,
-                OutputFiles = new Dictionary<string, string>(),
-                Hashes = new Dictionary<string, string>(),
+                SourceRelativePath = item.LocalPathFromRoot,
+                OutputFiles = new Dictionary<string, OutputFileInfo>(),
                 Metadata = item.Metadata,
             };
-            var outputDirectory = _settings.OutputFolder ?? Environment.CurrentDirectory;
+            var outputDirectory = _settings.OutputFolder ?? Directory.GetCurrentDirectory();
 
             // 1. process resource
             if (item.ResourceFile != null)
             {
                 // Resource file has already been processed in its plugin
-                manifestItem.OutputFiles.Add("resource", item.ResourceFile);
+                manifestItem.OutputFiles.Add("resource", new OutputFileInfo
+                {
+                    RelativePath = item.ResourceFile,
+                    LinkToPath = null,
+                    Hash = null
+                });
             }
 
             // 2. process model
@@ -101,7 +105,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                     // save raw model for further investigation:
                     var exportSettings = ApplyTemplateSettings.RawModelExportSettingsForDebug;
                     var rawModelPath = ExportModel(model, item.FileWithoutExtension, exportSettings);
-                    var message = $"Error transforming model \"{rawModelPath}\" generated from \"{item.LocalPathFromRepoRoot}\" using \"{template.ScriptName}\": {e.Message}";
+                    var message = $"Error transforming model \"{rawModelPath}\" generated from \"{item.LocalPathFromRoot}\" using \"{template.ScriptName}\": {e.Message}";
                     Logger.LogError(message);
                     throw new DocumentException(message, e);
                 }
@@ -116,7 +120,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                     // save view model for further investigation:
                     var exportSettings = ApplyTemplateSettings.ViewModelExportSettingsForDebug;
                     var viewModelPath = ExportModel(viewModel, outputFile, exportSettings);
-                    var message = $"Error applying template \"{template.Name}\" to view model \"{viewModelPath}\" generated from \"{item.LocalPathFromRepoRoot}\": {e.Message}";
+                    var message = $"Error applying template \"{template.Name}\" to view model \"{viewModelPath}\" generated from \"{item.LocalPathFromRoot}\": {e.Message}";
                     Logger.LogError(message);
                     throw new DocumentException(message, e);
                 }
@@ -139,7 +143,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                     else
                     {
                         TransformDocument(result, extension, _context, outputPath, outputFile, missingUids, manifestItem);
-                        Logger.Log(LogLevel.Verbose, $"Transformed model \"{item.LocalPathFromRepoRoot}\" to \"{outputPath}\".");
+                        Logger.LogDiagnostic($"Transformed model \"{item.LocalPathFromRoot}\" to \"{outputPath}\".");
                     }
                 }
             }
@@ -199,7 +203,7 @@ namespace Microsoft.DocAsCode.Build.Engine
             return modelPath.ToDisplayPath();
         }
 
-        private static void TransformDocument(string result, string extension, IDocumentBuildContext context, string outputPath, string relativeOutputPath, HashSet<string> missingUids, TemplateManifestItem manifestItem)
+        private static void TransformDocument(string result, string extension, IDocumentBuildContext context, string outputPath, string relativeOutputPath, HashSet<string> missingUids, ManifestItem manifestItem)
         {
             var subDirectory = Path.GetDirectoryName(outputPath);
             if (!string.IsNullOrEmpty(subDirectory) &&
@@ -240,8 +244,12 @@ namespace Microsoft.DocAsCode.Build.Engine
                     sw.Write(result);
                 }
             }
-            manifestItem.Hashes.Add(extension, Convert.ToBase64String(hashTask.Result));
-            manifestItem.OutputFiles.Add(extension, relativeOutputPath);
+            manifestItem.OutputFiles.Add(extension, new OutputFileInfo
+            {
+                RelativePath = relativeOutputPath,
+                LinkToPath = null,
+                Hash = Convert.ToBase64String(hashTask.Result)
+            });
         }
 
         private static void TranformHtml(IDocumentBuildContext context, string transformed, string relativeModelPath, StreamWriter outputWriter)

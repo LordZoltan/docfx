@@ -92,6 +92,7 @@ namespace Microsoft.DocAsCode.E2E.Tests
 
             // go to reference
             _driver.FindElement(By.LinkText("API Documentation")).Click();
+
             _driver.FindElements(By.XPath("//h4/a"))[0].Click();
 
             TestPageCommon();

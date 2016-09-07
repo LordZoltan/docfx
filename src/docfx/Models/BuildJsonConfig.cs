@@ -41,6 +41,9 @@ namespace Microsoft.DocAsCode
         [JsonConverter(typeof(JObjectDictionaryToObjectDictionaryConverter))]
         public Dictionary<string, object> GlobalMetadata { get; set; }
 
+        [JsonProperty("globalMetadataFiles")]
+        public ListWithStringFallback GlobalMetadataFilePaths { get; set; } = new ListWithStringFallback();
+
         /// <summary>
         /// Metadata that applies to some specific files.
         /// The key is the metadata name.
@@ -51,11 +54,17 @@ namespace Microsoft.DocAsCode
         [JsonProperty("fileMetadata")]
         public Dictionary<string, FileMetadataPairs> FileMetadata { get; set; }
 
+        [JsonProperty("fileMetadataFiles")]
+        public ListWithStringFallback FileMetadataFilePaths { get; set; } = new ListWithStringFallback();
+
         [JsonProperty("template")]
         public ListWithStringFallback Templates { get; set; } = new ListWithStringFallback();
 
         [JsonProperty("theme")]
         public ListWithStringFallback Themes { get; set; }
+
+        [JsonProperty("postProcessors")]
+        public ListWithStringFallback PostProcessors { get; set; } = new ListWithStringFallback();
 
         [JsonProperty("serve")]
         public bool? Serve { get; set; }
@@ -96,5 +105,11 @@ namespace Microsoft.DocAsCode
         /// </summary>
         [JsonProperty("noLangKeyword")]
         public bool NoLangKeyword { get; set; }
+
+        [JsonProperty("intermediateFolder")]
+        public string IntermediateFolder { get; set; }
+
+        [JsonProperty("changesFile")]
+        public string ChangesFile { get; set; }
     }
 }

@@ -128,6 +128,7 @@
     <Compile Include="SubCommands\MergeCommand.cs" />
     <Compile Include="SubCommands\MetadataMergeParameters.cs" />
     <Compile Include="SubCommands\MetadataMerger.cs" />
+    <Compile Include="SubCommands\OptionMerger.cs" />
     <Compile Include="SubCommands\TemplateCommand.cs" />
     <Compile Include="SubCommands\ServeCommand.cs" />
     <Compile Include="SubCommands\InitCommand.cs" />
@@ -179,6 +180,10 @@
   <ItemGroup>
     <EmbeddedResource Include="langwordMapping.yml" />
     <None Include="packages.config" />
+    <EmbeddedResource Include="Template\common.zip">
+      <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
+      <LogicalName>$(AssemblyName).Template.common.zip</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="Template\default.zip">
       <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
       <LogicalName>$(AssemblyName).Template.default.zip</LogicalName>
@@ -194,22 +199,6 @@
     <EmbeddedResource Include="Template\iframe.html.zip">
       <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
       <LogicalName>$(AssemblyName).Template.iframe.html.zip</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Template\msdn.html.zip">
-      <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
-      <LogicalName>$(AssemblyName).Template.msdn.html.zip</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Template\op.html.zip">
-      <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
-      <LogicalName>$(AssemblyName).Template.op.html.zip</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Template\vs.html.zip">
-      <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
-      <LogicalName>$(AssemblyName).Template.vs.html.zip</LogicalName>
-    </EmbeddedResource>
-    <EmbeddedResource Include="Template\docs.html.zip">
-      <!-- Default behavior of embedded resource name is DefaultNamespace.ExtendedNamespace.FileName, which is inconsistent with DNX version -->
-      <LogicalName>$(AssemblyName).Template.docs.html.zip</LogicalName>
     </EmbeddedResource>
   </ItemGroup>
   <ItemGroup>

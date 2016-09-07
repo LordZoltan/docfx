@@ -3,6 +3,7 @@
 
 namespace Microsoft.DocAsCode.MarkdownLite.Tests
 {
+    using System;
     using System.Linq;
     using System.Collections.Generic;
     using System.Text.RegularExpressions;
@@ -11,6 +12,7 @@ namespace Microsoft.DocAsCode.MarkdownLite.Tests
 
     using Xunit;
 
+    [Collection("docfx STA")]
     public class PerfTest
     {
         [Fact]
@@ -80,7 +82,7 @@ by a blank line.</p>
             var expectedList = new List<string> { first };
             for (var i = 1; i < 1000; i++)
             {
-                var content = string.Concat("-", i - 1);
+                var content = string.Concat("-", i);
                 expectedList.Add(string.Format(template, content));
             }
             var expected1000 = string.Concat(expectedList);
@@ -90,6 +92,7 @@ by a blank line.</p>
                 var result = engine.Markup(source1000);
                 Assert.Equal(expected1000, result);
             }
+            GC.Collect();
         }
     }
 }

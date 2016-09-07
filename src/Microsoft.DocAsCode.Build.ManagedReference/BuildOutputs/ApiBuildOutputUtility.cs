@@ -46,7 +46,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             {
                 result.Definition = ervm.Definition;
                 result.Name = ervm.Name;
-                result.NameWithTpye = ervm.NameWithType;
+                result.NameWithType = ervm.NameWithType;
                 result.FullName = ervm.FullName;
                 result.Spec = ervm.Spec;
             }
@@ -93,6 +93,14 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             if (!string.IsNullOrEmpty(name)) xref += $" name=\"{HttpUtility.HtmlEncode(name)}\"";
             xref += "/>";
             return xref;
+        }
+
+        public static string GetHref(string url, string altText = null)
+        {
+            var href = $"<span><a href=\"{url}\">";
+            if (!string.IsNullOrEmpty(altText)) href += HttpUtility.HtmlEncode(altText);
+            href += "</a></span>";
+            return href;
         }
     }
 }

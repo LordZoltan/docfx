@@ -21,11 +21,11 @@ namespace Microsoft.DocAsCode.Build.Engine
         {
             if (string.IsNullOrEmpty(defaultBaseDir))
             {
-                DefaultBaseDir = Environment.CurrentDirectory;
+                DefaultBaseDir = Directory.GetCurrentDirectory();
             }
             else
             {
-                DefaultBaseDir = Path.Combine(Environment.CurrentDirectory, defaultBaseDir);
+                DefaultBaseDir = Path.Combine(Directory.GetCurrentDirectory(), defaultBaseDir);
             }
         }
 
@@ -36,17 +36,17 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public string DefaultBaseDir { get; set; }
 
-        public void Add(DocumentType type, IEnumerable<string> files, Func<string, string> pathRewriter = null)
+        public void Add(DocumentType type, IEnumerable<string> files, string sourceDir = null, string destinationDir = null, string pathRewriteBaseDir = null)
         {
             _files.AddRange(from f in files
-                            select new FileAndType(DefaultBaseDir, ToRelative(f, DefaultBaseDir), type, pathRewriter));
+                            select new FileAndType(DefaultBaseDir, ToRelative(f, DefaultBaseDir), type, sourceDir, destinationDir, pathRewriteBaseDir));
         }
 
-        public void Add(DocumentType type, string baseDir, IEnumerable<string> files, Func<string, string> pathRewriter = null)
+        public void Add(DocumentType type, string baseDir, IEnumerable<string> files, string sourceDir = null, string destinationDir = null, string pathRewriteBaseDir = null)
         {
-            var rootedBaseDir = Path.Combine(Environment.CurrentDirectory, baseDir ?? string.Empty);
+            var rootedBaseDir = Path.Combine(Directory.GetCurrentDirectory(), baseDir ?? string.Empty);
             _files.AddRange(from f in files
-                            select new FileAndType(rootedBaseDir, ToRelative(f, rootedBaseDir), type, pathRewriter));
+                            select new FileAndType(rootedBaseDir, ToRelative(f, rootedBaseDir), type, sourceDir, destinationDir, pathRewriteBaseDir));
         }
 
         public void RemoveAll(Predicate<FileAndType> match)

@@ -26,6 +26,7 @@ namespace Microsoft.DocAsCode.Build.Engine
         /// in preprocessor script
         /// </summary>
         private const string ConsoleVariableName = "console";
+        private const string UtilityVariableName = "templateUtility";
         private const string ExportsVariableName = "exports";
         private const string GetOptionsFuncVariableName = "getOptions";
         private const string TransformFuncVariableName = "transform";
@@ -53,6 +54,7 @@ namespace Microsoft.DocAsCode.Build.Engine
         private const string RequireFuncVariableName = "require";
         private const string RequireRelativePathPrefix = "./";
 
+        private object _utilityObject;
         private static readonly object ConsoleObject = new
         {
             log = new Action<object>(s => Logger.Log(s)),
@@ -68,23 +70,28 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public Func<object, object> GetOptionsFunc { get; private set; }
 
-        public TemplateJintPreprocessor(ResourceCollection resourceCollection, TemplatePreprocessorResource scriptResource)
+        public TemplateJintPreprocessor(ResourceCollection resourceCollection, TemplatePreprocessorResource scriptResource, DocumentBuildContext context)
         {
             if (!string.IsNullOrWhiteSpace(scriptResource.Content))
             {
-                _engine = SetupEngine(resourceCollection, scriptResource);
+                _engine = SetupEngine(resourceCollection, scriptResource, context);
             }
             else
             {
                 _engine = null;
             }
-
         }
 
-        private Engine SetupEngine(ResourceCollection resourceCollection, TemplatePreprocessorResource scriptResource)
+        private Engine SetupEngine(ResourceCollection resourceCollection, TemplatePreprocessorResource scriptResource, DocumentBuildContext context)
         {
             var rootPath = (RelativePath)scriptResource.ResourceName;
             var engineCache = new Dictionary<string, Engine>();
+
+            var utility = new TemplateUtility(context);
+            _utilityObject = new
+            {
+                resolveSourceRelativePath = new Func<string, string, string>(utility.ResolveSourceRelativePath)
+            };
 
             var engine = CreateDefaultEngine();
 
@@ -134,7 +141,7 @@ namespace Microsoft.DocAsCode.Build.Engine
             return engine;
         }
 
-        private static Engine CreateEngine(Engine engine, params string[] sharedVariables)
+        private Engine CreateEngine(Engine engine, params string[] sharedVariables)
         {
             var newEngine = CreateDefaultEngine();
             if (sharedVariables != null)
@@ -148,12 +155,14 @@ namespace Microsoft.DocAsCode.Build.Engine
             return newEngine;
         }
 
-        private static Engine CreateDefaultEngine()
+        private Engine CreateDefaultEngine()
         {
             var engine = new Engine();
 
             engine.SetValue(ExportsVariableName, engine.Object.Construct(Jint.Runtime.Arguments.Empty));
             engine.SetValue(ConsoleVariableName, ConsoleObject);
+            engine.SetValue(UtilityVariableName, _utilityObject);
+
             return engine;
         }
 

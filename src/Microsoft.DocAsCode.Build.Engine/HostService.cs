@@ -13,6 +13,7 @@ namespace Microsoft.DocAsCode.Build.Engine
 
     using HtmlAgilityPack;
 
+    using Microsoft.DocAsCode.Build.Engine.Incrementals;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
     using Microsoft.DocAsCode.Plugins;
@@ -24,12 +25,11 @@ namespace Microsoft.DocAsCode.Build.Engine
         #region Fields
         private readonly object _syncRoot = new object();
         private readonly Dictionary<string, List<FileModel>> _uidIndex = new Dictionary<string, List<FileModel>>();
-        private readonly LruList<ModelWithCache> _lru = LruList<ModelWithCache>.CreateSynchronized(0xC00, OnLruRemoving);
+        private readonly LruList<ModelWithCache> _lru = Environment.Is64BitProcess ? null : LruList<ModelWithCache>.CreateSynchronized(0xC00, OnLruRemoving);
+        private readonly Dictionary<FileAndType, LoadPhase> _modelLoadInfo = new Dictionary<FileAndType, LoadPhase>();
         #endregion
 
         #region Properties
-
-        public IDocumentProcessor Processor { get; set; }
 
         public TemplateProcessor Template { get; set; }
 
@@ -43,6 +43,8 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public ImmutableList<IInputMetadataValidator> Validators { get; set; }
 
+        public DependencyGraph DependencyGraph { get; set; }
+
         #endregion
 
         #region Constructors
@@ -55,6 +57,8 @@ namespace Microsoft.DocAsCode.Build.Engine
         #endregion
 
         #region IHostService Members
+
+        public IDocumentProcessor Processor { get; set; }
 
         public ImmutableList<FileModel> GetModels(DocumentType? type)
         {
@@ -75,6 +79,10 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public ImmutableList<FileModel> LookupByUid(string uid)
         {
+            if (uid == null)
+            {
+                throw new ArgumentNullException(nameof(uid));
+            }
             lock (_syncRoot)
             {
                 List<FileModel> result;
@@ -88,10 +96,40 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public MarkupResult Markup(string markdown, FileAndType ft)
         {
+            if (markdown == null)
+            {
+                throw new ArgumentNullException(nameof(markdown));
+            }
+            if (ft == null)
+            {
+                throw new ArgumentNullException(nameof(ft));
+            }
+            return MarkupCore(markdown, ft, false);
+        }
+
+        public MarkupResult Markup(string markdown, FileAndType ft, bool omitParse)
+        {
+            if (markdown == null)
+            {
+                throw new ArgumentNullException(nameof(markdown));
+            }
+            if (ft == null)
+            {
+                throw new ArgumentNullException(nameof(ft));
+            }
+            return MarkupCore(markdown, ft, omitParse);
+        }
+
+        private MarkupResult MarkupCore(string markdown, FileAndType ft, bool omitParse)
+        {
             try
             {
-                var html = MarkupToHtml(markdown, ft.File);
-                return ParseHtml(html, ft);
+                var mr = MarkdownService.Markup(markdown, ft.File);
+                if (omitParse)
+                {
+                    return mr;
+                }
+                return Parse(mr, ft);
             }
             catch (Exception ex)
             {
@@ -103,7 +141,7 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public string MarkupToHtml(string markdown, string file)
         {
-            return MarkdownService.Markup(markdown, file);
+            return MarkdownService.Markup(markdown, file).Html;
         }
 
         public MarkupResult ParseHtml(string html, FileAndType ft)
@@ -122,6 +160,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                 node.Remove();
             }
             var linkToFiles = new HashSet<string>();
+            var fileLinkSources = new Dictionary<string, List<LinkSourceInfo>>();
             foreach (var pair in (from n in doc.DocumentNode.Descendants()
                                   where !string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
                                   from attr in n.Attributes
@@ -161,21 +200,181 @@ namespace Microsoft.DocAsCode.Build.Engine
                         }
                     }
                     linkToFiles.Add(HttpUtility.UrlDecode(file));
+
+                    List<LinkSourceInfo> sources;
+                    if (!fileLinkSources.TryGetValue(file, out sources))
+                    {
+                        sources = new List<LinkSourceInfo>();
+                        fileLinkSources[file] = sources;
+                    }
+                    sources.Add(new LinkSourceInfo
+                    {
+                        Target = file,
+                        SourceFile = pair.Node.GetAttributeValue("sourceFile", null),
+                        LineNumber = pair.Node.GetAttributeValue("sourceLineNumber", 0),
+                    });
                 }
             }
             result.LinkToFiles = linkToFiles.ToImmutableArray();
-            result.LinkToUids = (from n in doc.DocumentNode.Descendants()
-                                 where string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
-                                 from attr in n.Attributes
-                                 where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
-                                 where !string.IsNullOrWhiteSpace(attr.Value)
-                                 select attr.Value).ToImmutableHashSet();
+            result.FileLinkSources = fileLinkSources.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.ToImmutableList());
+
+            result.UidLinkSources = (from n in doc.DocumentNode.Descendants()
+                                     where string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
+                                     from attr in n.Attributes
+                                     where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
+                                     where !string.IsNullOrWhiteSpace(attr.Value)
+                                     select new LinkSourceInfo
+                                     {
+                                         Target = attr.Value,
+                                         SourceFile = n.GetAttributeValue("sourceFile", null),
+                                         LineNumber = n.GetAttributeValue("sourceLineNumber", 0),
+                                     } into lsi
+                                     group lsi by lsi.Target into g
+                                     select new KeyValuePair<string, ImmutableList<LinkSourceInfo>>(g.Key, g.ToImmutableList())).ToImmutableDictionary();
+            result.LinkToUids = result.UidLinkSources.Keys.ToImmutableHashSet();
+
             using (var sw = new StringWriter())
             {
                 doc.Save(sw);
                 result.Html = sw.ToString();
             }
             return result;
+        }
+
+        public MarkupResult Parse(MarkupResult markupResult, FileAndType ft)
+        {
+            if (markupResult == null)
+            {
+                throw new ArgumentNullException(nameof(markupResult));
+            }
+            if (ft == null)
+            {
+                throw new ArgumentNullException(nameof(ft));
+            }
+            return ParseCore(markupResult, ft);
+        }
+
+        private MarkupResult ParseCore(MarkupResult markupResult, FileAndType ft)
+        {
+            var doc = new HtmlDocument();
+            doc.LoadHtml(markupResult.Html);
+            var result = markupResult.Clone();
+
+            var node = doc.DocumentNode.SelectSingleNode("//yamlheader");
+            if (node != null)
+            {
+                using (var sr = new StringReader(StringHelper.HtmlDecode(node.InnerHtml)))
+                {
+                    result.YamlHeader = YamlUtility.Deserialize<Dictionary<string, object>>(sr).ToImmutableDictionary();
+                }
+                node.Remove();
+            }
+            var linkToFiles = new HashSet<string>();
+            var fileLinkSources = new Dictionary<string, List<LinkSourceInfo>>();
+            foreach (var pair in (from n in doc.DocumentNode.Descendants()
+                                  where !string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
+                                  from attr in n.Attributes
+                                  where string.Equals(attr.Name, "src", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase)
+                                  where !string.IsNullOrWhiteSpace(attr.Value)
+                                  select new { Node = n, Attr = attr }).ToList())
+            {
+                string linkFile;
+                string anchor = null;
+                var link = pair.Attr;
+                if (PathUtility.IsRelativePath(link.Value))
+                {
+                    var index = link.Value.IndexOf('#');
+                    if (index == -1)
+                    {
+                        linkFile = link.Value;
+                    }
+                    else if (index == 0)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        linkFile = link.Value.Remove(index);
+                        anchor = link.Value.Substring(index);
+                    }
+                    var path = (RelativePath)ft.File + (RelativePath)linkFile;
+                    var file = path.GetPathFromWorkingFolder();
+                    if (SourceFiles.ContainsKey(file))
+                    {
+                        link.Value = file;
+                        if (!string.IsNullOrEmpty(anchor) &&
+                            string.Equals(link.Name, "href", StringComparison.OrdinalIgnoreCase))
+                        {
+                            pair.Node.SetAttributeValue("anchor", anchor);
+                        }
+                    }
+                    linkToFiles.Add(HttpUtility.UrlDecode(file));
+
+                    List<LinkSourceInfo> sources;
+                    if (!fileLinkSources.TryGetValue(file, out sources))
+                    {
+                        sources = new List<LinkSourceInfo>();
+                        fileLinkSources[file] = sources;
+                    }
+                    sources.Add(new LinkSourceInfo
+                    {
+                        Target = file,
+                        SourceFile = pair.Node.GetAttributeValue("sourceFile", null),
+                        LineNumber = pair.Node.GetAttributeValue("sourceLineNumber", 0),
+                    });
+                }
+            }
+            result.LinkToFiles = linkToFiles.ToImmutableArray();
+            result.FileLinkSources = fileLinkSources.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.ToImmutableList());
+
+            result.UidLinkSources = (from n in doc.DocumentNode.Descendants()
+                                     where string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
+                                     from attr in n.Attributes
+                                     where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
+                                     where !string.IsNullOrWhiteSpace(attr.Value)
+                                     select new LinkSourceInfo
+                                     {
+                                         Target = attr.Value,
+                                         SourceFile = n.GetAttributeValue("sourceFile", null),
+                                         LineNumber = n.GetAttributeValue("sourceLineNumber", 0),
+                                     } into lsi
+                                     group lsi by lsi.Target into g
+                                     select new KeyValuePair<string, ImmutableList<LinkSourceInfo>>(g.Key, g.ToImmutableList())).ToImmutableDictionary();
+            result.LinkToUids = result.UidLinkSources.Keys.ToImmutableHashSet();
+
+            if (result.Dependency.Length > 0)
+            {
+                result.Dependency =
+                    (from d in result.Dependency
+                     select
+                        ((RelativePath)ft.File + (RelativePath)d)
+                            .GetPathFromWorkingFolder()
+                            .ToString()
+                    ).ToImmutableArray();
+            }
+            using (var sw = new StringWriter())
+            {
+                doc.Save(sw);
+                result.Html = sw.ToString();
+            }
+            return result;
+        }
+
+        // to-do: update signature so reporter could pass in more info
+        public void ReportDependency(FileModel currentFileModel, ImmutableArray<string> dependency)
+        {
+            if (currentFileModel == null)
+            {
+                throw new ArgumentNullException(nameof(currentFileModel));
+            }
+            lock (DependencyGraph)
+            {
+                string node = ((RelativePath)currentFileModel.OriginalFileAndType.File).GetPathFromWorkingFolder().ToString();
+                var items = from d in dependency
+                            select new DependencyItem(node, d, node, DependencyTypeName.Include);
+                DependencyGraph.ReportDependency(items);
+            }
         }
 
         public bool HasMetadataValidation => Validators.Count > 0;
@@ -189,6 +388,11 @@ namespace Microsoft.DocAsCode.Build.Engine
                     v.Validate(sourceFile, metadata);
                 }
             }
+        }
+
+        public void LogDiagnostic(string message, string file, string line)
+        {
+            Logger.LogDiagnostic(message, file: file, line: line);
         }
 
         public void LogVerbose(string message, string file, string line)
@@ -234,13 +438,117 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
         }
 
+        #region Model Load Info
+
+        public void ReportModelLoadInfo(FileAndType file, LoadPhase phase)
+        {
+            _modelLoadInfo[file] = phase;
+        }
+
+        public void ReportModelLoadInfo(IEnumerable<FileAndType> files, LoadPhase phase)
+        {
+            foreach (var f in files)
+            {
+                ReportModelLoadInfo(f, phase);
+            }
+        }
+
+        public void ReloadModelsPerIncrementalChanges(IEnumerable<string> changes, string cacheFolder, LoadPhase phase)
+        {
+            if (changes == null)
+            {
+                return;
+            }
+            ReloadUnloadedModelsPerCondition(
+                cacheFolder,
+                phase,
+                f =>
+                {
+                    var key = ((RelativePath)f.File).GetPathFromWorkingFolder().ToString();
+                    return changes.Contains(key);
+                });
+        }
+
+        public void ReloadUnloadedModels(string cacheFolder, LoadPhase phase)
+        {
+            ReloadUnloadedModelsPerCondition(cacheFolder, phase, f => _modelLoadInfo[f] == LoadPhase.None);
+        }
+
+        private void ReloadUnloadedModelsPerCondition(string cacheFolder, LoadPhase phase, Func<FileAndType, bool> condition)
+        {
+            if (cacheFolder == null)
+            {
+                return;
+            }
+            var toLoadList = (from f in _modelLoadInfo.Keys
+                              where condition(f)
+                              select LoadIntermediateModel(Path.Combine(cacheFolder, Path.GetFileName(f.File))) into m
+                              where m != null
+                              select m).ToList();
+            if (toLoadList.Count > 0)
+            {
+                Reload(Models.Concat(toLoadList));
+                ReportModelLoadInfo(toLoadList.Select(t => t.FileAndType), phase);
+            }
+        }
+
+        public void SaveIntermediateModel(string intermediateFolder, ModelManifest lmm, ModelManifest cmm)
+        {
+            var processor = Processor as ISupportIncrementalDocumentProcessor;
+            if (processor == null)
+            {
+                return;
+            }
+
+            foreach (var pair in _modelLoadInfo)
+            {
+                var fileName = Path.GetFileName(pair.Key.File);
+                if (pair.Value == LoadPhase.None)
+                {
+                    if (lmm == null)
+                    {
+                        throw new InvalidDataException($"Full build hasn't loaded model {pair.Key.FullPath}");
+                    }
+                    File.Copy(Path.Combine(intermediateFolder, lmm.BaseDir, fileName), Path.Combine(intermediateFolder, cmm.BaseDir, fileName));
+                }
+                else
+                {
+                    using (var stream = new FileStream(Path.Combine(intermediateFolder, cmm.BaseDir, fileName), FileMode.OpenOrCreate, FileAccess.Write))
+                    {
+                        // processor.SaveIntermediateModel(f, stream);
+                    }
+                }
+                cmm.Models.Add(fileName);
+            }
+        }
+
+        public FileModel LoadIntermediateModel(string fileName)
+        {
+            var processor = Processor as ISupportIncrementalDocumentProcessor;
+            if (processor == null)
+            {
+                return null;
+            }
+            using (var stream = new FileStream(fileName, FileMode.Open))
+            {
+                // return processor.LoadIntermediateModel(stream);
+                return null;
+            }
+        }
+
+        #endregion
+
         #region Private Methods
 
         private void LoadCore(IEnumerable<FileModel> models)
         {
             EventHandler fileOrBaseDirChangedHandler = HandleFileOrBaseDirChanged;
             EventHandler<PropertyChangedEventArgs<ImmutableArray<UidDefinition>>> uidsChangedHandler = HandleUidsChanged;
-            EventHandler contentAccessedHandler = ContentAccessedHandler;
+            EventHandler contentAccessedHandler = null;
+            if (!Environment.Is64BitProcess)
+            {
+                contentAccessedHandler = ContentAccessedHandler;
+            }
             if (Models != null)
             {
                 foreach (var m in Models)
@@ -341,5 +649,13 @@ namespace Microsoft.DocAsCode.Build.Engine
         }
 
         #endregion
+    }
+
+    internal enum LoadPhase
+    {
+        None,
+        PreBuild,
+        PostBuild,
+        PostPostBuild,
     }
 }

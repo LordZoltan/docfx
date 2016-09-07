@@ -52,7 +52,7 @@ namespace Microsoft.DocAsCode.Plugins
             {
                 if (value != BaseDir)
                 {
-                    FileAndType = new FileAndType(value, File, Type, PathRewriter);
+                    FileAndType = FileAndType.ChangeBaseDir(value);
                     OnFileOrBaseDirChanged();
                 }
             }
@@ -68,7 +68,7 @@ namespace Microsoft.DocAsCode.Plugins
             {
                 if (value != File)
                 {
-                    FileAndType = new FileAndType(BaseDir, value, Type, PathRewriter);
+                    FileAndType = FileAndType.ChangeFile(value);
                     OnFileOrBaseDirChanged();
                 }
             }
@@ -78,13 +78,21 @@ namespace Microsoft.DocAsCode.Plugins
 
         public string Key { get; }
 
-        public Func<string, string> PathRewriter => FileAndType.PathRewriter;
+        public ImmutableHashSet<string> LinkToFiles { get; set; } = ImmutableHashSet<string>.Empty;
+
+        public ImmutableHashSet<string> LinkToUids { get; set; } = ImmutableHashSet<string>.Empty;
+
+        public ImmutableDictionary<string, ImmutableList<LinkSourceInfo>> UidLinkSources { get; set; } = ImmutableDictionary<string, ImmutableList<LinkSourceInfo>>.Empty;
+
+        public ImmutableDictionary<string, ImmutableList<LinkSourceInfo>> FileLinkSources { get; set; } = ImmutableDictionary<string, ImmutableList<LinkSourceInfo>>.Empty;
 
         public dynamic Properties { get; } = new ExpandoObject();
 
         public dynamic ManifestProperties { get; } = new ExpandoObject();
 
-        public string LocalPathFromRepoRoot
+        public string LocalPathFromRepoRoot { get; set; }
+
+        public string LocalPathFromRoot
         {
             get
             {

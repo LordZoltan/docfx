@@ -42,10 +42,16 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
             {
                 throw new ArgumentException($"{nameof(MarkdownNewLineBlockRule)} should exist!");
             }
-            blockRules.Insert(index + 1, new DfmYamlHeaderBlockRule());
-            blockRules.Insert(index + 2, new AzureMigrationIncludeBlockRule());
-            blockRules.Insert(index + 3, new AzureNoteBlockRule());
-            blockRules.Insert(index + 4, new AzureSelectorBlockRule());
+            blockRules.InsertRange(
+                index + 1,
+                new IMarkdownRule[]
+                {
+                    new DfmYamlHeaderBlockRule(),
+                    new AzureMigrationIncludeBlockRule(),
+                    new AzureMigrationVideoBlockRule(),
+                    new AzureNoteBlockRule(),
+                    new AzureSelectorBlockRule()
+                });
 
             index = blockRules.FindLastIndex(s => s is MarkdownHtmlBlockRule);
             if (index < 1)
@@ -55,11 +61,10 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
             blockRules.Insert(index - 1, new AzureMigrationHtmlMetadataBlockRule());
 
             var gfmIndex = blockRules.FindIndex(item => item is GfmParagraphBlockRule);
-            blockRules[gfmIndex] = new AzureParagraphBlockRule();
+            blockRules[gfmIndex] = new AzureMigrationParagraphBlockRule();
 
             var markdownBlockQuoteIndex = blockRules.FindIndex(item => item is MarkdownBlockquoteBlockRule);
             blockRules[markdownBlockQuoteIndex] = new AzureBlockquoteBlockRule();
-            blockRules.Insert(markdownBlockQuoteIndex, new AzureVideoBlockRule());
 
             BlockRules = blockRules.ToImmutableList();
         }
@@ -98,7 +103,10 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                             (IMarkdownRewriteEngine e, AzureBlockquoteBlockToken t) => new MarkdownBlockquoteBlockToken(t.Rule, t.Context, t.Tokens, t.SourceInfo)
                         ),
                         MarkdownTokenRewriterFactory.FromLambda(
-                            (IMarkdownRewriteEngine e, MarkdownLinkInlineToken t) => new MarkdownLinkInlineToken(t.Rule, t.Context, NormalizeAzureLink(t.Href, MarkdownExtension, t.Context, t.SourceInfo.Markdown), t.Title, t.Content, t.SourceInfo)
+                            (IMarkdownRewriteEngine e, MarkdownLinkInlineToken t) => new MarkdownLinkInlineToken(t.Rule, t.Context, NormalizeAzureLink(t.Href, MarkdownExtension, t.Context, t.SourceInfo.Markdown, t.SourceInfo.LineNumber.ToString()), t.Title, t.Content, t.SourceInfo, t.LinkType, t.RefId)
+                        ),
+                        MarkdownTokenRewriterFactory.FromLambda(
+                            (IMarkdownRewriteEngine e, MarkdownImageInlineToken t) => new MarkdownImageInlineToken(t.Rule, t.Context, CheckNonMdRelativeFileHref(t.Href, t.Context, t.SourceInfo.Markdown, t.SourceInfo.LineNumber.ToString()), t.Title, t.Text, t.SourceInfo, t.LinkType, t.RefId)
                         ),
                         MarkdownTokenRewriterFactory.FromLambda(
                             (IMarkdownRewriteEngine e, AzureSelectorBlockToken t) => new DfmSectionBlockToken(t.Rule, t.Context, GenerateAzureSelectorAttributes(t.SelectorType, t.SelectorConditions), t.SourceInfo)
@@ -111,17 +119,25 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                         ),
                         MarkdownTokenRewriterFactory.FromLambda(
                             (IMarkdownRewriteEngine e, AzureMigrationIncludeInlineToken t) => new DfmIncludeInlineToken(t.Rule, t.Context, t.Src, t.Name, t.Title, t.SourceInfo.Markdown, t.SourceInfo)
+                        ),
+                        MarkdownTokenRewriterFactory.FromLambda(
+                            (IMarkdownRewriteEngine e, AzureVideoBlockToken t) => new DfmVideoBlockToken(t.Rule, t.Context, GenerateAzureVideoLink(t.Context, t.VideoId, t.SourceInfo.Markdown, t.SourceInfo.LineNumber.ToString()), t.SourceInfo)
                         )
                     );
         }
 
-        private string NormalizeAzureLink(string href, string defaultExtension, IMarkdownContext context, string rawMarkdown)
+        private string NormalizeAzureLink(string href, string defaultExtension, IMarkdownContext context, string rawMarkdown, string line)
         {
-            bool isHrefRelativeNonMdFile;
-            var link = AppendDefaultExtension(href, defaultExtension, out isHrefRelativeNonMdFile);
-            if (!isHrefRelativeNonMdFile)
+            string link = href;
+
+            // link change to the href result after append default extension.
+            var result = AppendDefaultExtension(href, defaultExtension, context, rawMarkdown, line);
+            link = result.Href;
+
+            // link change if the azure link need to be resolved.
+            if (result.NeedContinue && result.NeedResolveAzureLink.HasValue && result.NeedResolveAzureLink == true)
             {
-                link = GenerateAzureLinkHref(context, link, rawMarkdown);
+                link = GenerateAzureLinkHref(context, link, rawMarkdown, line);
             }
             return link;
         }
@@ -131,14 +147,27 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
         /// </summary>
         /// <param name="href">original href string</param>
         /// <param name="defaultExtension">default extension to append</param>
-        /// <param name="isHrefRelativeNonMdFile">true if it is a relative path and not a markdown file. Otherwise false</param>
         /// <returns>Href with default extension appended</returns>
-        private string AppendDefaultExtension(string href, string defaultExtension, out bool isHrefRelativeNonMdFile)
+        private AppendDefaultExtensionResult AppendDefaultExtension(string href, string defaultExtension, IMarkdownContext context, string rawMarkdown, string line)
         {
-            isHrefRelativeNonMdFile = false;
-            if (!PathUtility.IsRelativePath(href))
+            // If the context doesn't have necessary info, return the original href
+            if (!context.Variables.ContainsKey("path"))
             {
-                return href;
+                return new AppendDefaultExtensionResult(false, href, null);
+            }
+            var currentFilePath = (string)context.Variables["path"];
+
+            try
+            {
+                if (!PathUtility.IsRelativePath(href))
+                {
+                    return new AppendDefaultExtensionResult(false, href, null);
+                }
+            }
+            catch (ArgumentException)
+            {
+                Logger.LogWarning($"Invalid reference {href} in file: {currentFilePath}. Raw: {rawMarkdown}", null, currentFilePath, line);
+                return new AppendDefaultExtensionResult(false, href, null);
             }
 
             var index = href.IndexOf('#');
@@ -150,20 +179,17 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                 // Regard all the relative path with no extension as markdown file that missing .md
                 if (string.IsNullOrEmpty(extension))
                 {
-                    return $"{href}{defaultExtension}";
+                    return new AppendDefaultExtensionResult(true, $"{href}{defaultExtension}", true);
                 }
                 else
                 {
-                    if (!extension.Equals(MarkdownExtension, StringComparison.OrdinalIgnoreCase))
-                    {
-                        isHrefRelativeNonMdFile = true;
-                    }
-                    return href;
+                    bool isMarkdownFile = extension.Equals(MarkdownExtension, StringComparison.OrdinalIgnoreCase);
+                    return new AppendDefaultExtensionResult(true, href, isMarkdownFile);
                 }
             }
             else if (index == 0)
             {
-                return href;
+                return new AppendDefaultExtensionResult(true, href, false);
             }
             else
             {
@@ -172,15 +198,12 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                 var extension = Path.GetExtension(hrefWithoutAnchor);
                 if (string.IsNullOrEmpty(extension))
                 {
-                    return $"{hrefWithoutAnchor}{defaultExtension}{anchor}";
+                    return new AppendDefaultExtensionResult(true, $"{hrefWithoutAnchor}{defaultExtension}{anchor}", true);
                 }
                 else
                 {
-                    if (!extension.Equals(MarkdownExtension, StringComparison.OrdinalIgnoreCase))
-                    {
-                        isHrefRelativeNonMdFile = true;
-                    }
-                    return $"{hrefWithoutAnchor}{anchor}";
+                    bool isMarkdownFile = extension.Equals(MarkdownExtension, StringComparison.OrdinalIgnoreCase);
+                    return new AppendDefaultExtensionResult(true, $"{hrefWithoutAnchor}{anchor}", isMarkdownFile);
                 }
             }
         }
@@ -217,8 +240,13 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
             return MarkdownEngine.Normalize(propertiesSw.ToString() + "\n" + tagsSw.ToString());
         }
 
-        private string GenerateAzureLinkHref(IMarkdownContext context, string href, string rawMarkdown)
+        private string GenerateAzureLinkHref(IMarkdownContext context, string href, string rawMarkdown, string line)
         {
+            if (string.IsNullOrEmpty(href))
+            {
+                return string.Empty;
+            }
+
             StringBuffer content = StringBuffer.Empty;
 
             // If the context doesn't have necessary info, return the original href
@@ -227,9 +255,17 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                 return href;
             }
 
-            // if the href is not relative path, return it
-            if (!PathUtility.IsRelativePath(href))
+            // if the href is not relative path, return it. Add try catch to keep this method safe.
+            try
             {
+                if (!PathUtility.IsRelativePath(href))
+                {
+                    return href;
+                }
+            }
+            catch (ArgumentException)
+            {
+                Logger.LogWarning($"Invalid reference {href} in file: {(string)context.Variables["path"]}. Raw: {rawMarkdown}", null, (string)context.Variables["path"], line);
                 return href;
             }
 
@@ -256,7 +292,7 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
             var azureMarkdownFileInfoMapping = (IReadOnlyDictionary<string, AzureFileInfo>)context.Variables["azureMarkdownFileInfoMapping"];
             if (azureMarkdownFileInfoMapping == null || !azureMarkdownFileInfoMapping.ContainsKey(hrefFileName))
             {
-                Logger.LogWarning($"Can't fild reference file: {href} in azure file system for file {currentFilePath}. Raw: {rawMarkdown}");
+                Logger.LogWarning($"Can't find markdown reference: {href}. Raw: {rawMarkdown}.", null, currentFilePath, line);
                 return href;
             }
 
@@ -266,5 +302,76 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
 
             return azureHref;
         }
+
+        private string CheckNonMdRelativeFileHref(string nonMdHref, IMarkdownContext context, string rawMarkdown, string line)
+        {
+            // If the context doesn't have necessary info or nonMdHref is not a relative path, return the original href
+            if (!context.Variables.ContainsKey("path") || !PathUtility.IsRelativePath(nonMdHref))
+            {
+                return nonMdHref;
+            }
+
+            var currentFilePath = (string)context.Variables["path"];
+            var currentFolderPath = Path.GetDirectoryName(currentFilePath);
+
+            var nonMdExpectedPath = Path.Combine(currentFolderPath, nonMdHref);
+            if (!File.Exists(nonMdExpectedPath))
+            {
+                Logger.LogWarning($"Can't find resource reference: {nonMdHref}. Raw: {rawMarkdown}.", null, currentFilePath, line);
+            }
+            return nonMdHref;
+        }
+
+
+        private string GenerateAzureVideoLink(IMarkdownContext context, string azureVideoId, string rawMarkdown, string line)
+        {
+            object path;
+            if (!context.Variables.TryGetValue("path", out path))
+            {
+                Logger.LogWarning("Can't get current file path. Skip video token rewriter.");
+                return azureVideoId;
+            }
+
+            if (!context.Variables.ContainsKey("azureVideoInfoMapping"))
+            {
+                Logger.LogWarning($"Can't find the whole azure video info mapping. Raw: {rawMarkdown}", null, path.ToString(), line);
+                return azureVideoId;
+            }
+
+            var azureVideoInfoMapping = (IReadOnlyDictionary<string, AzureVideoInfo>)context.Variables["azureVideoInfoMapping"];
+            if (azureVideoInfoMapping == null || !azureVideoInfoMapping.ContainsKey(azureVideoId))
+            {
+                Logger.LogWarning($"Can't find video reference: {azureVideoId}. Raw: {rawMarkdown}", null, path.ToString(), line);
+                return azureVideoId;
+            }
+
+            var azureVideoInfo = azureVideoInfoMapping[azureVideoId];
+            return azureVideoInfo.Link;
+        }
+    }
+
+    internal class AppendDefaultExtensionResult
+    {
+        public AppendDefaultExtensionResult(bool needContinue, string href, bool? needResolveAzureLink)
+        {
+            NeedContinue = needContinue;
+            Href = href;
+            NeedResolveAzureLink = needResolveAzureLink;
+        }
+
+        /// <summary>
+        /// Indicate whether need to continue to do the following transform for the href
+        /// </summary>
+        public bool NeedContinue { get; }
+
+        /// <summary>
+        /// Href after processing append default extension method
+        /// </summary>
+        public string Href { get; }
+
+        /// <summary>
+        /// True if it is a markdown file. Otherwise false. Null when the NeedContinue is false.
+        /// </summary>
+        public bool? NeedResolveAzureLink { get; }
     }
 }

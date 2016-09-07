@@ -11,6 +11,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
     using YamlDotNet.Serialization;
 
     using Microsoft.DocAsCode.DataContracts.Common;
+    using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.ManagedReference;
     using Microsoft.DocAsCode.Utility.EntityMergers;
     using Microsoft.DocAsCode.YamlSerialization;
@@ -104,15 +105,15 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
 
         [YamlMember(Alias = "exceptions")]
         [JsonProperty("exceptions")]
-        public List<ApiCrefInfoBuildOutput> Exceptions { get; set; }
+        public List<ApiExceptionInfoBuildOutput> Exceptions { get; set; }
 
         [YamlMember(Alias = "seealso")]
         [JsonProperty("seealso")]
-        public List<ApiCrefInfoBuildOutput> SeeAlsos { get; set; }
+        public List<ApiLinkInfoBuildOutput> SeeAlsos { get; set; }
 
         [YamlMember(Alias = "see")]
         [JsonProperty("see")]
-        public List<ApiCrefInfoBuildOutput> Sees { get; set; }
+        public List<ApiLinkInfoBuildOutput> Sees { get; set; }
 
         [YamlMember(Alias = "inheritance")]
         [MergeOption(MergeOption.Ignore)]
@@ -152,6 +153,21 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             if (model == null || model.Items == null || model.Items.Count == 0)
             {
                 return null;
+            }
+
+            object displayLangs;
+            if (model.Metadata.TryGetValue("_displayLangs", out displayLangs))
+            {
+                var langsObj = displayLangs as object[];
+                if (langsObj != null)
+                {
+                    var langs = langsObj.Select(x => x?.ToString()).ToArray();
+                    model.Items.ForEach(item => item.SupportedLanguages = IntersectLangs(item.SupportedLanguages, langs));
+                }
+                else
+                {
+                    Logger.LogWarning("Invalid displayLangs setting in docfx.json. Ignored.");
+                }
             }
 
             var metadata = model.Metadata;
@@ -205,8 +221,8 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Syntax = ApiSyntaxBuildOutput.FromModel(model.Syntax, references, model.SupportedLanguages),
                 Overridden = ApiBuildOutputUtility.GetApiNames(model.Overridden, references, model.SupportedLanguages),
                 Exceptions = GetCrefInfoList(model.Exceptions, references, model.SupportedLanguages),
-                SeeAlsos = GetCrefInfoList(model.SeeAlsos, references, model.SupportedLanguages),
-                Sees = GetCrefInfoList(model.Sees, references, model.SupportedLanguages),
+                SeeAlsos = GetLinkInfoList(model.SeeAlsos, references, model.SupportedLanguages),
+                Sees = GetLinkInfoList(model.Sees, references, model.SupportedLanguages),
                 Inheritance = GetReferenceList(model.Inheritance, references, model.SupportedLanguages, true),
                 Implements = model.Implements?.Select(u => ApiBuildOutputUtility.GetApiNames(u, references, model.SupportedLanguages)).ToList(),
                 InheritedMembers = GetReferenceList(model.InheritedMembers, references, model.SupportedLanguages),
@@ -232,11 +248,28 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             }
         }
 
-        private static List<ApiCrefInfoBuildOutput> GetCrefInfoList(List<CrefInfo> crefs,
+        private static List<ApiExceptionInfoBuildOutput> GetCrefInfoList(List<ExceptionInfo> crefs,
                                                                     Dictionary<string, ApiReferenceBuildOutput> references,
                                                                     string[] supportedLanguages)
         {
-            return crefs?.Select(c => ApiCrefInfoBuildOutput.FromModel(c, references, supportedLanguages)).ToList();
+            return crefs?.Select(c => ApiExceptionInfoBuildOutput.FromModel(c, references, supportedLanguages)).ToList();
+        }
+
+        private static List<ApiLinkInfoBuildOutput> GetLinkInfoList(List<LinkInfo> links,
+                                                                    Dictionary<string, ApiReferenceBuildOutput> references,
+                                                                    string[] supportedLanguages)
+        {
+            return links?.Select(l => ApiLinkInfoBuildOutput.FromModel(l, references, supportedLanguages)).ToList();
+        }
+
+        private static string[] IntersectLangs(string[] defaultLangs, string[] displayLangs)
+        {
+            if (displayLangs.Length == 0)
+            {
+                return defaultLangs;
+            }
+
+            return defaultLangs?.Intersect(displayLangs, StringComparer.OrdinalIgnoreCase).ToArray();
         }
     }
 }

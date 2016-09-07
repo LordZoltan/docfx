@@ -34,6 +34,8 @@ namespace Microsoft.DocAsCode.MarkdownLite
 
         public IMarkdownTokenRewriter Rewriter { get; }
 
+        public IMarkdownTokenTreeValidator TokenTreeValidator { get; set; }
+
         public Dictionary<string, LinkObj> Links { get; }
 
         public int MaxExtractCount { get; set; } = 1;
@@ -63,14 +65,28 @@ namespace Microsoft.DocAsCode.MarkdownLite
                         MarkdownTokenRewriterFactory.FromLambda<IMarkdownRewriteEngine, TwoPhaseBlockToken>(
                             (e, t) => t.Extract(parser)),
                     MaxExtractCount + 1));
+            internalRewriteEngine.Initialize();
             tokens = internalRewriteEngine.Rewrite(tokens);
+            internalRewriteEngine.Complete();
+
             var idTable = new Dictionary<string, int>();
             var idRewriteEngine = new MarkdownRewriteEngine(
                 this,
                 MarkdownTokenRewriterFactory.FromLambda<IMarkdownRewriteEngine, MarkdownHeadingBlockToken>(
                     (e, t) => t.RewriteId(idTable)));
+            idRewriteEngine.Initialize();
             tokens = idRewriteEngine.Rewrite(tokens);
-            tokens = RewriteEngine.Rewrite(tokens);
+            idRewriteEngine.Complete();
+
+            var rewriteEngine = RewriteEngine;
+            rewriteEngine.Initialize();
+            tokens = rewriteEngine.Rewrite(tokens);
+            rewriteEngine.Complete();
+
+            if (TokenTreeValidator != null)
+            {
+                TokenTreeValidator.Validate(tokens);
+            }
             var renderer = Renderer;
             foreach (var token in tokens)
             {
@@ -84,7 +100,7 @@ namespace Microsoft.DocAsCode.MarkdownLite
             var normalized = Normalize(markdown);
             return Mark(SourceInfo.Create(normalized, file), null).ToString();
         }
-        
+
         protected virtual string Preprocess(string src)
         {
             return Regexes.Lexers.WhiteSpaceLine.Replace(src, string.Empty);

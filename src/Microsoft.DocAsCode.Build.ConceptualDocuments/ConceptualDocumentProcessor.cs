@@ -13,9 +13,10 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
     using Microsoft.DocAsCode.Build.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.Plugins;
+    using Microsoft.DocAsCode.Utility;
 
     [Export(typeof(IDocumentProcessor))]
-    public class ConceptualDocumentProcessor : DisposableDocumentProcessor
+    public class ConceptualDocumentProcessor : DisposableDocumentProcessor, ISupportIncrementalDocumentProcessor
     {
         [ImportMany(nameof(ConceptualDocumentProcessor))]
         public override IEnumerable<IDocumentBuildStep> BuildSteps { get; set; }
@@ -49,12 +50,16 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                     content[item.Key] = item.Value;
                 }
             }
+
+            var displayLocalPath = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, file.FullPath);
+
             return new FileModel(
                 file,
                 content,
-                serializer: new BinaryFormatter())
+                serializer: Environment.Is64BitProcess ? null : new BinaryFormatter())
             {
-                LocalPathFromRepoRoot = (content["source"] as SourceDetail)?.Remote?.RelativePath
+                LocalPathFromRepoRoot = (content["source"] as SourceDetail)?.Remote?.RelativePath,
+                LocalPathFromRoot = displayLocalPath
             };
         }
 
@@ -69,8 +74,10 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             {
                 DocumentType = model.DocumentType ?? "Conceptual",
                 FileWithoutExtension = Path.ChangeExtension(model.File, null),
-                LinkToFiles = model.Properties.LinkToFiles,
-                LinkToUids = model.Properties.LinkToUids,
+                LinkToFiles = model.LinkToFiles.ToImmutableArray(),
+                LinkToUids = model.LinkToUids,
+                FileLinkSources = model.FileLinkSources,
+                UidLinkSources = model.UidLinkSources,
             };
             if (model.Properties.XrefSpec != null)
             {
@@ -79,5 +86,24 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
 
             return result;
         }
+
+        #region ISupportIncrementalDocumentProcessor Members
+
+        public string GetIncrementalContextHash()
+        {
+            return null;
+        }
+
+        public void SaveIntermediateModel(FileModel model, Stream stream)
+        {
+            throw new NotImplementedException();
+        }
+
+        public FileModel LoadIntermediateModel(Stream stream)
+        {
+            throw new NotImplementedException();
+        }
+
+        #endregion
     }
 }

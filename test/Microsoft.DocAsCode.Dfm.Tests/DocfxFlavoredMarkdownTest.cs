@@ -5,6 +5,7 @@ namespace Microsoft.DocAsCode.Dfm.Tests
 {
     using System.Collections.Generic;
     using System.Composition.Hosting;
+    using System.Collections.Immutable;
     using System.IO;
     using System.Linq;
     using System.Xml;
@@ -35,7 +36,7 @@ b:
 ---", "<yamlheader start=\"1\" end=\"5\">a: b\nb:\n  c: e</yamlheader>")]
         [InlineData(@"# Hello @CrossLink1 @'CrossLink2'dummy 
 @World",
-            "<h1 id=\"hello-crosslink1-crosslink2-dummy\">Hello <xref href=\"CrossLink1\" data-throw-if-not-resolved=\"False\" data-raw=\"@CrossLink1\"></xref> <xref href=\"CrossLink2\" data-throw-if-not-resolved=\"False\" data-raw=\"@&#39;CrossLink2&#39;\"></xref>dummy</h1>\n<p><xref href=\"World\" data-throw-if-not-resolved=\"False\" data-raw=\"@World\"></xref></p>\n")]
+            "<h1 id=\"hello-crosslink1-crosslink2dummy\">Hello <xref href=\"CrossLink1\" data-throw-if-not-resolved=\"False\" data-raw=\"@CrossLink1\"></xref> <xref href=\"CrossLink2\" data-throw-if-not-resolved=\"False\" data-raw=\"@&#39;CrossLink2&#39;\"></xref>dummy</h1>\n<p><xref href=\"World\" data-throw-if-not-resolved=\"False\" data-raw=\"@World\"></xref></p>\n")]
         [InlineData("a\n```\nc\n```",
             "<p>a</p>\n<pre><code>c\n</code></pre>")]
         [InlineData(@"* Unordered list item 1
@@ -54,10 +55,6 @@ b:
         [InlineData(
             @"[*a*](xref:uid)",
             "<p><a href=\"xref:uid\"><em>a</em></a></p>\n")]
-        [InlineData("# sān　空格　 sān\n", "<h1 id=\"sān-空格-sān\">sān　空格　 sān</h1>\n")]
-        [InlineData("# Hello World\n# Hello World", "<h1 id=\"hello-world\">Hello World</h1>\n<h1 id=\"hello-world-0\">Hello World</h1>\n")]
-        [InlineData("# a-0\n# a\n# a", "<h1 id=\"a-0\">a-0</h1>\n<h1 id=\"a\">a</h1>\n<h1 id=\"a-0-0\">a</h1>\n")]
-        [InlineData("# 测试。用例\n# 测试。用例", "<h1 id=\"测试-用例\">测试。用例</h1>\n<h1 id=\"测试-用例-0\">测试。用例</h1>\n")]
         public void TestDfmInGeneral(string source, string expected)
         {
             Assert.Equal(expected.Replace("\r\n", "\n"), DocfxFlavoredMarked.Markup(source));
@@ -71,7 +68,7 @@ b:
             //  |- root.md
             //  |- empty.md
             //  |- a
-            //  |  |- root.md
+            //  |  |- refc.md
             //  |- b
             //  |  |- linkAndRefRoot.md
             //  |  |- a.md
@@ -106,7 +103,8 @@ Paragraph1
             WriteToFile("r/link/link2.md", link2);
             WriteToFile("r/c/c.md", c);
             WriteToFile("r/empty.md", string.Empty);
-            var marked = DocfxFlavoredMarked.Markup(root, "r/root.md");
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "r/root.md", dependency: dependency);
             Assert.Equal(@"<!-- BEGIN INCLUDE: Include content from &quot;r/b/linkAndRefRoot.md&quot; --><p>Paragraph1
 <a href=""~/r/b/a.md"">link</a>
 <!-- BEGIN INCLUDE: Include content from &quot;r/link/link2.md&quot; --><a href=""~/r/link/md/c.md"">link</a><!--END INCLUDE -->
@@ -115,6 +113,17 @@ Paragraph1
 <!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/a/refc.md&quot; --><!-- BEGIN INCLUDE: Include content from &quot;r/c/c.md&quot; --><p><strong>Hello</strong></p>
 <!--END INCLUDE --><!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/a/refc.md&quot; --><!-- BEGIN INCLUDE: Include content from &quot;r/c/c.md&quot; --><p><strong>Hello</strong></p>
 <!--END INCLUDE --><!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/empty.md&quot; --><!--END INCLUDE --><!-- BEGIN ERROR INCLUDE: Absolute path &quot;http://microsoft.com/a.md&quot; is not supported. -->[!include[external](http://microsoft.com/a.md)]<!--END ERROR INCLUDE -->".Replace("\r\n", "\n"), marked);
+            Assert.Equal(
+                new[]
+                {
+                    "a/refc.md",
+                    "b/linkAndRefRoot.md",
+                    "c/c.md",
+                    "empty.md",
+                    "link/link2.md",
+                    "root.md",
+                },
+                dependency.OrderBy(x => x));
         }
 
         [Fact]
@@ -151,7 +160,8 @@ Paragraph1
             WriteToFile("r/a/a.md", a);
             WriteToFile("r/b/token.md", token);
             WriteToFile("r/c/d/d.md", d);
-            var marked = DocfxFlavoredMarked.Markup(a, "r/a/a.md");
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(a, "r/a/a.md", dependency: dependency);
             var expected = @"<!-- BEGIN INCLUDE: Include content from &quot;r/b/token.md&quot; --><p><img src=""~/r/img/img.jpg"" alt="""">
 <a href=""#anchor""></a>
 <a href=""~/r/a/a.md"">a</a>
@@ -159,10 +169,23 @@ Paragraph1
 <a href=""~/r/c/d/d.md#anchor"">d</a></p>
 <!--END INCLUDE -->".Replace("\r\n", "\n");
             Assert.Equal(expected, marked);
-            marked = DocfxFlavoredMarked.Markup(d, "r/c/d/d.md");
+            Assert.Equal(
+                new[] { "../b/token.md" },
+                dependency.OrderBy(x => x));
+
+            dependency.Clear();
+            marked = DocfxFlavoredMarked.Markup(d, "r/c/d/d.md", dependency: dependency);
             Assert.Equal(expected, marked);
-            marked = DocfxFlavoredMarked.Markup(r, "r/r.md");
+            Assert.Equal(
+                new[] { "../../b/token.md" },
+                dependency.OrderBy(x => x));
+
+            dependency.Clear();
+            marked = DocfxFlavoredMarked.Markup(r, "r/r.md", dependency: dependency);
             Assert.Equal($@"<!-- BEGIN INCLUDE: Include content from &quot;r/a/a.md&quot; -->{expected}<!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/c/d/d.md&quot; -->{expected}<!--END INCLUDE -->", marked);
+            Assert.Equal(
+                new[] { "a/a.md", "b/token.md", "c/d/d.md" },
+                dependency.OrderBy(x => x));
         }
 
         [Fact]
@@ -183,8 +206,12 @@ Inline [!include[ref3](ref3.md ""This is root"")]
             File.WriteAllText("ref2.md", ref2);
             File.WriteAllText("ref3.md", ref3);
 
-            var marked = DocfxFlavoredMarked.Markup(root, "root.md");
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "root.md", dependency: dependency);
             Assert.Equal("<p>Inline <!-- BEGIN INCLUDE: Include content from &quot;ref1.md&quot; --><!-- BEGIN INCLUDE: Include content from &quot;ref2.md&quot; -->## Inline inclusion do not parse header <!-- BEGIN ERROR INCLUDE: Unable to resolve [!include[root](root.md &quot;This is root&quot;)]: Circular dependency found in &quot;ref2.md&quot; -->[!include[root](root.md \"This is root\")]<!--END ERROR INCLUDE --><!--END INCLUDE --><!--END INCLUDE -->\nInline <!-- BEGIN INCLUDE: Include content from &quot;ref3.md&quot; --><strong>Hello</strong><!--END INCLUDE --></p>\n", marked);
+            Assert.Equal(
+                new[] { "ref1.md", "ref2.md", "ref3.md", "root.md" },
+                dependency.OrderBy(x => x));
         }
 
         [Fact]
@@ -212,7 +239,68 @@ Inline [!include[ref3](ref3.md ""This is root"")]
             File.WriteAllText("inc2.md", inc2);
             File.WriteAllText("inc3.md", inc3);
 
-            var marked = DocfxFlavoredMarked.Markup(root, "root.md");
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "root.md", dependency: dependency);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+            Assert.Equal(
+              new[] { "inc1.md", "inc2.md", "inc3.md" },
+              dependency.OrderBy(x => x));
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmVideo_Video()
+        {
+            // 1. Prepare data
+            var root = @"The following is video.
+> [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]
+";
+
+            var expected = @"<p>The following is video.</p>
+<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+";
+
+            var marked = DocfxFlavoredMarked.Markup(root);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmVideo_ConsecutiveVideos()
+        {
+            // 1. Prepare data
+            var root = @"The following is two videos.
+> [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]
+> [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]";
+
+            var expected = @"<p>The following is two videos.</p>
+<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+";
+
+            var marked = DocfxFlavoredMarked.Markup(root);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmVideo_MixWithNote()
+        {
+            // 1. Prepare data
+            var root = @"The following is video mixed with note.
+> [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]
+> [!NOTE]
+> this is note text
+> [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]";
+
+            var expected = @"<p>The following is video mixed with note.</p>
+<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+<div class=""NOTE""><h5>NOTE</h5><p>this is note text</p>
+</div>
+<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+";
+
+            var marked = DocfxFlavoredMarked.Markup(root);
             Assert.Equal(expected.Replace("\r\n", "\n"), marked);
         }
 
@@ -252,6 +340,33 @@ this is also warning</p>
 </div>
 ";
             var marked = DocfxFlavoredMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmNote_NoteWithLocalization()
+        {
+            var source = @"# Note not in one line
+> [!NOTE]hello
+> world
+> [!WARNING]     Hello world
+this is also warning";
+            var expected = @"<h1 id=""note-not-in-one-line"">Note not in one line</h1>
+<div class=""NOTE""><h5>注意</h5><p>hello
+world</p>
+</div>
+<div class=""WARNING""><h5>警告</h5><p>Hello world
+this is also warning</p>
+</div>
+";
+            var marked = DocfxFlavoredMarked.Markup(source,
+                null,
+                new Dictionary<string, string>
+                {
+                    {"note", "<h5>注意</h5>"},
+                    {"warning", "<h5>警告</h5>" }
+                }.ToImmutableDictionary());
             Assert.Equal(expected.Replace("\r\n", "\n"), marked);
         }
 
@@ -306,7 +421,7 @@ world</p>
 
 ---";
             var expected = @"<hr/>
-<h3 id=""-unconfigure"">/Unconfigure</h3>
+<h3 id=""unconfigure"">/Unconfigure</h3>
 <hr/>
 ";
             var marked = DocfxFlavoredMarked.Markup(source);
@@ -452,7 +567,7 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
             var jsNode = tabbedCodeNode.SelectSingleNode("./pre/code[@class='lang-javascript-i']");
             Assert.True(jsNode != null);
         }
-        
+
         [Theory]
         [Trait("Related", "DfmMarkdown")]
         [InlineData(@"> this is blockquote
@@ -556,10 +671,60 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
 
         [Fact]
         [Trait("Related", "DfmMarkdown")]
+        public void TestDfm_EncodeInStrongEM()
+        {
+            var source = @"tag started with non-alphabet should be encoded <1-100>, <_hello>, <?world>, <1_2 href=""good"">, <1 att='bcd'>.
+tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b href=""good""> <AC att='bcd'>";
+
+            var expected = @"<p>tag started with non-alphabet should be encoded &lt;1-100&gt;, &lt;_hello&gt;, &lt;?world&gt;, &lt;1_2 href=&quot;good&quot;&gt;, &lt;1 att=&#39;bcd&#39;&gt;.
+tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b href=""good""> <AC att='bcd'></p>
+";
+            var marked = DocfxFlavoredMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmImageLink_WithSpecialCharactorsInAltText()
+        {
+            var source = @"![This is image alt text with quotation ' and double quotation ""hello"" world](girl.png)";
+
+            var expected = @"<p><img src=""girl.png"" alt=""This is image alt text with quotation &#39; and double quotation &quot;hello&quot; world""/></p>
+";
+            var marked = DocfxFlavoredMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        [Trait("A wrong case need to be fixed in dfm", "' in title should be traslated to &#39; instead of &amp;#39;")]
+        public void TestDfmLink_LinkWithSpecialCharactorsInTitle()
+        {
+            var source = @"[text's string](https://www.google.com.sg/?gfe_rd=cr&ei=Xk ""Google's homepage"")";
+            var expected = @"<p><a href=""https://www.google.com.sg/?gfe_rd=cr&amp;ei=Xk"" title=""Google&#39;s homepage"">text&#39;s string</a></p>
+";
+            var marked = DocfxFlavoredMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmLink_WithSpecialCharactorsInTitle()
+        {
+            var source = @"[This is link text with quotation ' and double quotation ""hello"" world](girl.png ""title is ""hello"" world."")";
+
+            var expected = @"<p><a href=""girl.png"" title=""title is &quot;hello&quot; world."">This is link text with quotation &#39; and double quotation &quot;hello&quot; world</a></p>
+";
+            var marked = DocfxFlavoredMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
         public void TestPathUtility_AbsoluteLinkWithBracketAndBrackt()
         {
             var source = @"[User-Defined Date/Time Formats (Format Function)](http://msdn2.microsoft.com/library/73ctwf33\(VS.90\).aspx)";
-            var expected = @"<p><a href=""http://msdn2.microsoft.com/library/73ctwf33\(VS.90\).aspx"">User-Defined Date/Time Formats (Format Function)</a></p>
+            var expected = @"<p><a href=""http://msdn2.microsoft.com/library/73ctwf33(VS.90).aspx"">User-Defined Date/Time Formats (Format Function)</a></p>
 ";
             var marked = DocfxFlavoredMarked.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), marked);
@@ -574,7 +739,8 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
                 new ContainerConfiguration()
                     .WithAssembly(typeof(DocfxFlavoredMarkdownTest).Assembly)
                     .CreateContainer());
-            mrb.AddTagValidators(
+            mrb.AddTagValidators(new[]
+            {
                 new MarkdownTagValidationRule
                 {
                     TagNames = new List<string> { "em", "div" },
@@ -587,9 +753,16 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
                     TagNames = new List<string> { "h1" },
                     MessageFormatter = "Warning tag({0})!",
                     Behavior = TagValidationBehavior.Warning,
-                });
-            mrb.AddValidators(HtmlMarkdownTokenValidatorProvider.ContractName);
-            builder.Rewriter = mrb.Create();
+                },
+            });
+            mrb.AddValidators(new[]
+            {
+                new MarkdownValidationRule
+                {
+                    ContractName =  HtmlMarkdownTokenValidatorProvider.ContractName,
+                }
+            });
+            builder.Rewriter = mrb.CreateRewriter();
 
             var engine = builder.CreateDfmEngine(new DfmRenderer());
             var listener = new TestLoggerListener("test!!!!" + "." + MarkdownValidatorBuilder.MarkdownValidatePhaseName);
@@ -602,7 +775,7 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
             Logger.UnregisterListener(listener);
             Assert.Equal("<div><i>x</i><EM>y</EM><h1>z</h1></div>", result);
             Assert.Equal(5, listener.Items.Count);
-            Assert.Equal(new[] { HtmlMarkdownTokenValidatorProvider.WarningMessage,  "Invalid tag(div)!", "Invalid tag(EM)!", "Warning tag(h1)!", "Warning tag(h1)!" }, from item in listener.Items select item.Message);
+            Assert.Equal(new[] { HtmlMarkdownTokenValidatorProvider.WarningMessage, "Invalid tag(div)!", "Invalid tag(EM)!", "Warning tag(h1)!", "Warning tag(h1)!" }, from item in listener.Items select item.Message);
         }
 
         [Fact]
@@ -626,8 +799,12 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
    }
 }";
             File.WriteAllText("api.json", apiJsonContent.Replace("\r\n", "\n"));
-            var marked = DocfxFlavoredMarked.Markup(root, "api.json");
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "api.json", dependency: dependency);
             Assert.Equal("<pre><code class=\"lang-FakeREST\" name=\"REST\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre><pre><code class=\"lang-FakeREST-i\" name=\"REST-i\" title=\"This is root\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre><pre><code name=\"No Language\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre><pre><code class=\"lang-js\" name=\"empty\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre>", marked);
+            Assert.Equal(
+                new[] { "api.json" },
+                dependency.OrderBy(x => x));
         }
 
         [Theory]

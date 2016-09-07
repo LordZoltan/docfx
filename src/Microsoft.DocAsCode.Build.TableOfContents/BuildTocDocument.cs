@@ -14,7 +14,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents
     using Microsoft.DocAsCode.Utility;
 
     [Export(nameof(TocDocumentProcessor), typeof(IDocumentBuildStep))]
-    public class BuildTocDocument : BaseDocumentBuildStep
+    public class BuildTocDocument : BaseDocumentBuildStep, ISupportIncrementalBuildStep
     {
         public override string Name => nameof(BuildTocDocument);
 
@@ -83,18 +83,13 @@ namespace Microsoft.DocAsCode.Build.TableOfContents
                 linkToFiles.Add(item.Homepage.Split('#')[0]);
             }
 
-            if (!string.IsNullOrEmpty(item.Uid))
+            if (!string.IsNullOrEmpty(item.TopicUid))
             {
-                linkToUids.Add(item.Uid);
+                linkToUids.Add(item.TopicUid);
             }
 
-            if (!string.IsNullOrEmpty(item.HomepageUid))
-            {
-                linkToUids.Add(item.HomepageUid);
-            }
-
-            ((HashSet<string>)model.Properties.LinkToUids).UnionWith(linkToUids);
-            ((HashSet<string>)model.Properties.LinkToFiles).UnionWith(linkToFiles);
+            model.LinkToUids = model.LinkToUids.Union(linkToUids);
+            model.LinkToFiles = model.LinkToFiles.Union(linkToFiles);
 
             if (item.Items != null)
             {
@@ -104,5 +99,19 @@ namespace Microsoft.DocAsCode.Build.TableOfContents
                 }
             }
         }
+
+        #region ISupportIncrementalBuild Members
+
+        public bool CanIncrementalBuild(FileAndType fileAndType)
+        {
+            return true;
+        }
+
+        public string GetIncrementalContextHash()
+        {
+            return null;
+        }
+
+        #endregion
     }
 }

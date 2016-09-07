@@ -64,7 +64,7 @@ namespace Test1
             Assert.Equal(@"
 This is a test
 ".Replace("\r\n", "\n"), @class.Summary);
-            Assert.Equal("Test1.Class1.Func1(System.Int32)", @class.SeeAlsos[0].Type);
+            Assert.Equal("Test1.Class1.Func1(System.Int32)", @class.SeeAlsos[0].LinkId);
             Assert.Equal(@"[Serializable]
 public class Class1", @class.Syntax.Content[SyntaxLanguage.CSharp]);
 
@@ -77,7 +77,7 @@ public class Class1", @class.Syntax.Content[SyntaxLanguage.CSharp]);
             Assert.Equal(@"
 This is a function
 ".Replace("\r\n", "\n"), function.Summary);
-            Assert.Equal("System.Int32", function.SeeAlsos[0].Type);
+            Assert.Equal("System.Int32", function.SeeAlsos[0].LinkId);
             Assert.Equal("This is a param as <xref href=\"System.Int32\" data-throw-if-not-resolved=\"false\"></xref>", function.Syntax.Parameters[0].Description);
             Assert.Equal(1, output.Items.Count);
             var parameter = function.Syntax.Parameters[0];
@@ -2286,6 +2286,38 @@ namespace Test1
                 Assert.Equal("Test1.Foo.Item(System.Object)", method.Name);
                 Assert.Equal(@"public dynamic this[dynamic index] { get; }", method.Syntax.Content[SyntaxLanguage.CSharp]);
                 Assert.Equal(@"Public ReadOnly Property Item(index As Object) As Object", method.Syntax.Content[SyntaxLanguage.VB]);
+            }
+        }
+
+        [Fact]
+        [Trait("Related", "Multilanguage")]
+        public void TestGenerateMetadataWithStaticClass()
+        {
+            string code = @"
+using System.Collections.Generic;
+namespace Test1
+{
+    public static class Foo
+    {
+    }
+}
+";
+            MetadataItem output = GenerateYamlMetadata(CreateCompilationFromCSharpCode(code));
+            {
+                var type = output.Items[0].Items[0];
+                Assert.NotNull(type);
+                Assert.Equal("Foo", type.DisplayNames[SyntaxLanguage.CSharp]);
+                Assert.Equal("Foo", type.DisplayNames[SyntaxLanguage.VB]);
+                Assert.Equal("Test1.Foo", type.DisplayQualifiedNames[SyntaxLanguage.CSharp]);
+                Assert.Equal("Test1.Foo", type.DisplayQualifiedNames[SyntaxLanguage.VB]);
+                Assert.Equal("Test1.Foo", type.Name);
+                Assert.Equal(1, type.Inheritance.Count);
+                Assert.Equal("System.Object", type.Inheritance[0]);
+
+                Assert.Equal(@"public static class Foo", type.Syntax.Content[SyntaxLanguage.CSharp]);
+                Assert.Equal(@"Public Module Foo", type.Syntax.Content[SyntaxLanguage.VB]);
+                Assert.Equal(new[] { "public", "static", "class" }, type.Modifiers[SyntaxLanguage.CSharp]);
+                Assert.Equal(new[] { "Public", "Module" }, type.Modifiers[SyntaxLanguage.VB]);
             }
         }
 

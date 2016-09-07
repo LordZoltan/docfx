@@ -22,6 +22,12 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             _configRule = LoadRules(configFile);
         }
 
+        public ConfigFilterVisitor(IFilterVisitor inner, ConfigFilterRule rule)
+            : base(inner)
+        {
+            _configRule = rule;
+        }
+
         protected override bool CanVisitApiCore(ISymbol symbol, bool wantProtectedMember, IFilterVisitor outer)
         {
             if (symbol == null)
@@ -29,29 +35,31 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 throw new ArgumentNullException("symbol");
             }
 
-            if (!Inner.CanVisitApi(symbol, wantProtectedMember,outer))
+            if (!Inner.CanVisitApi(symbol, wantProtectedMember, outer))
             {
                 return false;
             }
 
-            return CanVisitCore(_configRule.ApiRules, symbol, wantProtectedMember, outer);
+            return CanVisitCore(_configRule.ApiRules, symbol);
         }
 
-        private bool CanVisitCore(IEnumerable<ConfigFilterRuleItemUnion> ruleItems, ISymbol symbol, bool wantProtectedMember, IFilterVisitor outer)
+        protected override bool CanVisitAttributeCore(ISymbol symbol, bool wantProtectedMember, IFilterVisitor outer)
         {
-            var current = symbol;
-            var parent = symbol.ContainingSymbol;
-            while (!(current is INamespaceSymbol) && parent != null)
+            if (symbol == null)
             {
-                if (!outer.CanVisitApi(parent, wantProtectedMember, outer))
-                {
-                    return false;
-                }
-
-                current = parent;
-                parent = parent.ContainingSymbol;
+                throw new ArgumentNullException("symbol");
             }
 
+            if (!Inner.CanVisitAttribute(symbol, wantProtectedMember, outer))
+            {
+                return false;
+            }
+
+            return CanVisitCore(_configRule.AttributeRules, symbol);
+        }
+
+        private bool CanVisitCore(IEnumerable<ConfigFilterRuleItemUnion> ruleItems, ISymbol symbol)
+        {
             foreach (var ruleUnion in ruleItems)
             {
                 ConfigFilterRuleItem rule = ruleUnion.Rule;
@@ -63,7 +71,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             return true;
         }
 
-        private static ConfigFilterRule LoadRules(string configFile)
+        public static ConfigFilterRule LoadRules(string configFile)
         {
             if (string.IsNullOrEmpty(configFile))
             {

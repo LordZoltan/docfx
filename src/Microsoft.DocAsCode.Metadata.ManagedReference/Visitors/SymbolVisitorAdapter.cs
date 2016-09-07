@@ -8,12 +8,14 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
     using System.Collections.Immutable;
     using System.Diagnostics;
     using System.Linq;
+    using System.IO;
     using System.Text.RegularExpressions;
 
     using Microsoft.CodeAnalysis;
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.ManagedReference;
+    using Microsoft.DocAsCode.Exceptions;
 
     public class SymbolVisitorAdapter
         : SymbolVisitor<MetadataItem>
@@ -39,7 +41,8 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             _currentCompilation = compilation;
             _currentCompilationRef = compilation.ToMetadataReference();
             _preserveRawInlineComments = preserveRawInlineComments;
-            FilterVisitor = string.IsNullOrEmpty(filterConfigFile) ? new DefaultFilterVisitor() : new DefaultFilterVisitor().WithConfig(filterConfigFile).WithCache();
+            var configFilterRule = LoadConfigFilterRule(filterConfigFile);
+            FilterVisitor = new DefaultFilterVisitor().WithConfig(configFilterRule).WithCache();
             _extensionMethods = extensionMethods != null ? extensionMethods.ToDictionary(p => p.Key, p => p.Value.Where(e => FilterVisitor.CanVisitApi(e))) : new Dictionary<Compilation, IEnumerable<IMethodSymbol>>();
         }
 
@@ -92,17 +95,17 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
 
             if (item.Sees != null)
             {
-                foreach (var i in item.Sees)
+                foreach (var i in item.Sees.Where(l => l.LinkType == LinkType.CRef))
                 {
-                    AddReference(i.Type, i.CommentId);
+                    AddReference(i.LinkId, i.CommentId);
                 }
             }
 
             if (item.SeeAlsos != null)
             {
-                foreach (var i in item.SeeAlsos)
+                foreach (var i in item.SeeAlsos.Where(l => l.LinkType == LinkType.CRef))
                 {
-                    AddReference(i.Type, i.CommentId);
+                    AddReference(i.LinkId, i.CommentId);
                 }
             }
 
@@ -129,12 +132,14 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             };
             item.Type = MemberType.Assembly;
             _references = new Dictionary<string, ReferenceItem>();
-            var namespaces = symbol.GlobalNamespace.GetNamespaceMembers().ToList();
-            if (namespaces.Count == 0)
+
+            var typeMembers = symbol.GlobalNamespace.GetTypeMembers();
+            if (typeMembers.Any())
             {
-                Logger.LogWarning($"No namespace is found in assembly {symbol.MetadataName}. DocFX currently only supports generating metadata with namespace defined.");
+                Logger.LogWarning($"DocFX currently only supports generating metadata with namespace defined. The following types in assembly \"{symbol.MetadataName}\" will have no metadata generated: {string.Join(", ", typeMembers.Select(m => m.MetadataName))}. ");
             }
 
+            var namespaces = symbol.GlobalNamespace.GetNamespaceMembers().ToList();
             item.Items = VisitDescendants(
                 namespaces,
                 ns => ns.GetMembers().OfType<INamespaceSymbol>(),
@@ -169,7 +174,10 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
 
             GenerateInheritance(symbol, item);
 
-            GenerateExtensionMethods(symbol, item);
+            if (!symbol.IsStatic)
+            {
+                GenerateExtensionMethods(symbol, item);
+            }
 
             item.Type = VisitorHelper.GetMemberTypeFromTypeKind(symbol.TypeKind);
             if (item.Syntax == null)
@@ -423,7 +431,14 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             IReadOnlyList<string> typeGenericParameters = null,
             IReadOnlyList<string> methodGenericParameters = null)
         {
-            return _generator.AddSpecReference(symbol, typeGenericParameters, methodGenericParameters, _references, this);
+            try
+            {
+                return _generator.AddSpecReference(symbol, typeGenericParameters, methodGenericParameters, _references, this);
+            }
+            catch (Exception ex)
+            {
+                throw new DocfxException($"Unable to generate spec reference for {VisitorHelper.GetCommentId(symbol)}", ex);
+            }
         }
 
         #endregion
@@ -885,6 +900,39 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
 
                 // only record the id now, the value would be fed at later phase after merge
                 item.References[id] = null;
+            };
+        }
+
+        private ConfigFilterRule LoadConfigFilterRule(string filterConfigFile)
+        {
+            ConfigFilterRule defaultRule, userRule;
+
+            var assembly = this.GetType().Assembly;
+            var defaultConfigPath = $"{assembly.GetName().Name}.Filters.defaultfilterconfig.yml";
+            using (var stream = assembly.GetManifestResourceStream(defaultConfigPath))
+            using (var reader = new StreamReader(stream))
+            {
+                defaultRule = YamlUtility.Deserialize<ConfigFilterRule>(reader);
+            }
+
+            if (string.IsNullOrEmpty(filterConfigFile))
+            {
+                return defaultRule;
+            }
+            else
+            {
+                userRule = ConfigFilterVisitor.LoadRules(filterConfigFile);
+                return MergeConfigRule(defaultRule, userRule);
+            }
+        }
+
+        private static ConfigFilterRule MergeConfigRule(ConfigFilterRule defaultRule, ConfigFilterRule userRule)
+        {
+            return new ConfigFilterRule
+            {
+                // user rule always overwrite default rule
+                ApiRules = userRule.ApiRules.Concat(defaultRule.ApiRules).ToList(),
+                AttributeRules = userRule.AttributeRules.Concat(defaultRule.AttributeRules).ToList(),
             };
         }
 

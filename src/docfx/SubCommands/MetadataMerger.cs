@@ -43,8 +43,8 @@ namespace Microsoft.DocAsCode.SubCommands
             {
                 Directory.CreateDirectory(parameters.OutputBaseDir);
                 Logger.LogInfo("Start merge metadata...");
-                MergePageViewModel(parameters, Environment.CurrentDirectory);
-                MergeToc(parameters, Environment.CurrentDirectory);
+                MergePageViewModel(parameters, Directory.GetCurrentDirectory());
+                MergeToc(parameters, Directory.GetCurrentDirectory());
                 Logger.LogInfo("Merge metadata completed.");
             }
         }
@@ -59,7 +59,7 @@ namespace Microsoft.DocAsCode.SubCommands
             };
             var fc = new FileCollection(parameters.Files);
             fc.RemoveAll(x => "toc.yml".Equals(Path.GetFileName(x.File), StringComparison.OrdinalIgnoreCase));
-            var models = DocumentBuilder.Build(
+            var models = SingleDocumentBuilder.Build(
                 p,
                 new DocumentBuildParameters
                 {
@@ -76,11 +76,12 @@ namespace Microsoft.DocAsCode.SubCommands
                     }));
             foreach (var m in models)
             {
-                m.File = m.PathRewriter(m.File);
+                m.File = Path.Combine(m.FileAndType.DestinationDir ?? string.Empty, PathUtility.MakeRelativePath(m.FileAndType.SourceDir, Path.Combine(m.FileAndType.PathReWriteBaseDir, m.File)));
+                Console.WriteLine($"File:{m.OriginalFileAndType.File} from:{m.FileAndType.SourceDir} to:{m.FileAndType.DestinationDir} => {m.File}");
             }
             foreach (var m in models)
             {
-                YamlUtility.Serialize(Path.Combine(outputBase, m.File), m.Content);
+                YamlUtility.Serialize(Path.Combine(outputBase, m.File), m.Content, YamlMime.ManagedReference);
             }
         }
 
@@ -93,7 +94,12 @@ namespace Microsoft.DocAsCode.SubCommands
             var vm = MergeTocViewModel(
                 from f in tocFiles
                 select YamlUtility.Deserialize<TocViewModel>(Path.Combine(f.BaseDir, f.File)));
-            YamlUtility.Serialize(Path.Combine(outputBase, tocFiles[0].PathRewriter(tocFiles[0].File)), vm);
+            YamlUtility.Serialize(
+                Path.Combine(
+                    outputBase,
+                    Path.Combine(tocFiles[0].DestinationDir ?? string.Empty, PathUtility.MakeRelativePath(tocFiles[0].SourceDir, Path.Combine(tocFiles[0].PathReWriteBaseDir, tocFiles[0].File)))),
+                vm,
+                YamlMime.TableOfContent);
         }
 
         private static TocItemViewModel MergeTocItem(List<TocItemViewModel> items)

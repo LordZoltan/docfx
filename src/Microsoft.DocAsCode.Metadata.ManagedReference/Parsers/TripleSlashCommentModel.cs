@@ -10,6 +10,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
     using System.Net;
     using System.Text;
     using System.Text.RegularExpressions;
+    using System.Web;
     using System.Xml;
     using System.Xml.Linq;
     using System.Xml.XPath;
@@ -31,9 +32,9 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         public string Summary { get; private set; }
         public string Remarks { get; private set; }
         public string Returns { get; private set; }
-        public List<CrefInfo> Exceptions { get; private set; }
-        public List<CrefInfo> Sees { get; private set; }
-        public List<CrefInfo> SeeAlsos { get; private set; }
+        public List<ExceptionInfo> Exceptions { get; private set; }
+        public List<LinkInfo> Sees { get; private set; }
+        public List<LinkInfo> SeeAlsos { get; private set; }
         public List<string> Examples { get; private set; }
         public Dictionary<string, string> Parameters { get; private set; }
         public Dictionary<string, string> TypeParameters { get; private set; }
@@ -153,7 +154,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         /// <param name="normalize"></param>
         /// <returns></returns>
         /// <exception cref="XmlException">This is a sample of exception node</exception>
-        private List<CrefInfo> GetExceptions(XPathNavigator nav, ITripleSlashCommentParserContext context)
+        private List<ExceptionInfo> GetExceptions(XPathNavigator nav, ITripleSlashCommentParserContext context)
         {
             string selector = "/member/exception";
             var result = GetMulitpleCrefInfo(nav, selector).ToList();
@@ -169,9 +170,9 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         /// <returns></returns>
         /// <see cref="SpecIdHelper"/>
         /// <see cref="SourceSwitch"/>
-        private List<CrefInfo> GetSees(XPathNavigator nav, ITripleSlashCommentParserContext context)
+        private List<LinkInfo> GetSees(XPathNavigator nav, ITripleSlashCommentParserContext context)
         {
-            var result = GetMulitpleCrefInfo(nav, "/member/see").ToList();
+            var result = GetMultipleLinkInfo(nav, "/member/see").ToList();
             if (result.Count == 0) return null;
             return result;
         }
@@ -184,9 +185,9 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         /// <returns></returns>
         /// <seealso cref="WaitForChangedResult"/>
         /// <seealso cref="http://google.com">ABCS</seealso>
-        private List<CrefInfo> GetSeeAlsos(XPathNavigator nav, ITripleSlashCommentParserContext context)
+        private List<LinkInfo> GetSeeAlsos(XPathNavigator nav, ITripleSlashCommentParserContext context)
         {
-            var result = GetMulitpleCrefInfo(nav, "/member/seealso").ToList();
+            var result = GetMultipleLinkInfo(nav, "/member/seealso").ToList();
             if (result.Count == 0) return null;
             return result;
         }
@@ -255,13 +256,13 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         private void ResolveSeeAlsoCref(XNode node, Action<string, string> addReference)
         {
             // Resolve <see cref> to <xref>
-            ResolveCrefLink(node, "//seealso", addReference);
+            ResolveCrefLink(node, "//seealso[@cref]", addReference);
         }
 
         private void ResolveSeeCref(XNode node, Action<string, string> addReference)
         {
             // Resolve <see cref> to <xref>
-            ResolveCrefLink(node, "//see", addReference);
+            ResolveCrefLink(node, "//see[@cref]", addReference);
         }
 
         private void ResolveCrefLink(XNode node, string nodeSelector, Action<string, string> addReference)
@@ -283,7 +284,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                         // When see and seealso are top level nodes in triple slash comments, do not convert it into xref node
                         if (item.Parent?.Parent != null)
                         {
-                            var replacement = XElement.Parse($"<xref href=\"{WebUtility.HtmlEncode(value)}\" data-throw-if-not-resolved=\"false\"></xref>");
+                            var replacement = XElement.Parse($"<xref href=\"{HttpUtility.UrlEncode(value)}\" data-throw-if-not-resolved=\"false\"></xref>");
                             item.ReplaceWith(replacement);
                         }
 
@@ -331,7 +332,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             }
         }
 
-        private IEnumerable<CrefInfo> GetMulitpleCrefInfo(XPathNavigator navigator, string selector)
+        private IEnumerable<ExceptionInfo> GetMulitpleCrefInfo(XPathNavigator navigator, string selector)
         {
             var iterator = navigator.Clone().Select(selector);
             if (iterator == null) yield break;
@@ -347,8 +348,35 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                     {
                         string type = commentId.Substring(2);
                         if (string.IsNullOrEmpty(description)) description = null;
-                        yield return new CrefInfo { Description = description, Type = type, CommentId = commentId };
+                        yield return new ExceptionInfo { Description = description, Type = type, CommentId = commentId };
                     }
+                }
+            }
+        }
+
+        private IEnumerable<LinkInfo> GetMultipleLinkInfo(XPathNavigator navigator, string selector)
+        {
+            var iterator = navigator.Clone().Select(selector);
+            if (iterator == null) yield break;
+            foreach (XPathNavigator nav in iterator)
+            {
+                string altText = GetXmlValue(nav);
+                if (string.IsNullOrEmpty(altText)) altText = null;
+
+                string commentId = nav.GetAttribute("cref", string.Empty);
+                string url = nav.GetAttribute("href", string.Empty);
+                if (!string.IsNullOrEmpty(commentId))
+                {
+                    // Check if cref type is valid and trim prefix
+                    if (CommentIdRegex.IsMatch(commentId))
+                    {
+                        string type = commentId.Substring(2);
+                        yield return new LinkInfo { AltText = altText, LinkId = type, CommentId = commentId, LinkType = LinkType.CRef };
+                    }
+                }
+                else if (!string.IsNullOrEmpty(url))
+                {
+                    yield return new LinkInfo { AltText = altText, LinkId = url, LinkType = LinkType.HRef };
                 }
             }
         }
@@ -380,7 +408,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             var lineInfo = node as IXmlLineInfo;
             int column = lineInfo.HasLineInfo() ? lineInfo.LinePosition - 2 : 0;
 
-            return WebUtility.HtmlDecode(NormalizeXml(node.InnerXml, column));
+            return NormalizeXml(node.InnerXml, column);
         }
 
         /// <summary>
@@ -417,7 +445,17 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             }
 
             // trim newline character for code element
-            return CodeElementRegex.Replace(string.Join("\n", normalized), m => { var group = m.Groups[1]; return m.Value.Replace(group.ToString(), group.ToString().Trim('\n')); });
+            return CodeElementRegex.Replace(
+                string.Join("\n", normalized),
+                m =>
+                {
+                    var group = m.Groups[1];
+                    if (group.ToString() == string.Empty)
+                    {
+                        return m.Value;
+                    }
+                    return m.Value.Replace(group.ToString(), group.ToString().Trim('\n'));
+                });
         }
     }
 }

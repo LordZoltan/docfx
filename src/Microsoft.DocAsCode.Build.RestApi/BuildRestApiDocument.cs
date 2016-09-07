@@ -11,7 +11,7 @@ namespace Microsoft.DocAsCode.Build.RestApi
     using System.Linq;
 
     using Microsoft.DocAsCode.Build.Common;
-    using Microsoft.DocAsCode.Build.RestApi.ViewModels;
+    using Microsoft.DocAsCode.DataContracts.RestApi;
     using Microsoft.DocAsCode.Plugins;
     using Microsoft.DocAsCode.Utility;
     using Microsoft.DocAsCode.Utility.EntityMergers;
@@ -61,7 +61,7 @@ namespace Microsoft.DocAsCode.Build.RestApi
             item.Description = Markup(host, item.Description, model, filter);
             if (model.Type != DocumentType.Overwrite)
             {
-            item.Conceptual = Markup(host, item.Conceptual, model, filter);
+                item.Conceptual = Markup(host, item.Conceptual, model, filter);
             }
             return item;
         }
@@ -99,8 +99,39 @@ namespace Microsoft.DocAsCode.Build.RestApi
             }
 
             var mr = host.Markup(markdown, model.FileAndType);
-            ((HashSet<string>)model.Properties.LinkToFiles).UnionWith(mr.LinkToFiles);
-            ((HashSet<string>)model.Properties.LinkToUids).UnionWith(mr.LinkToUids);
+            model.LinkToFiles = model.LinkToFiles.Union(mr.LinkToFiles);
+            model.LinkToUids = model.LinkToUids.Union(mr.LinkToUids);
+
+            var fls = model.FileLinkSources.ToDictionary(p => p.Key, p => p.Value);
+            foreach (var pair in mr.FileLinkSources)
+            {
+                ImmutableList<LinkSourceInfo> list;
+                if (fls.TryGetValue(pair.Key, out list))
+                {
+                    fls[pair.Key] = list.AddRange(pair.Value);
+                }
+                else
+                {
+                    fls[pair.Key] = pair.Value;
+                }
+            }
+            model.FileLinkSources = fls.ToImmutableDictionary();
+
+            var uls = model.UidLinkSources.ToDictionary(p => p.Key, p => p.Value);
+            foreach (var pair in mr.UidLinkSources)
+            {
+                ImmutableList<LinkSourceInfo> list;
+                if (uls.TryGetValue(pair.Key, out list))
+                {
+                    uls[pair.Key] = list.AddRange(pair.Value);
+                }
+                else
+                {
+                    uls[pair.Key] = pair.Value;
+                }
+            }
+            model.UidLinkSources = uls.ToImmutableDictionary();
+
             return mr.Html;
         }
     }

@@ -14,6 +14,8 @@ namespace Microsoft.DocAsCode.MarkdownAzureRewritersTest.Tests
 
     public class AzureMarkdownRewritersTest
     {
+        #region Azure marked
+
         [Fact]
         [Trait("Related", "AzureMarkdownRewriters")]
         public void TestAzureMarkdownRewriters_Simple()
@@ -90,6 +92,62 @@ This is azure warning";
 > 
 > [!WARNING]
 > This is azure warning
+> 
+> 
+
+";
+            var result = AzureMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownRewriters_AzureNoteShouldParseFollowedText()
+        {
+            var source = @"> [AZURE.NOTE]
+> This is a link [hello text]      (hello.md)
+> This is a style text _yes_";
+            var expected = @"> [!NOTE]
+> This is a link [hello text](hello.md)
+> This is a style text *yes*
+> 
+> 
+
+";
+            var result = AzureMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownRewriters_AzureNoteWithExtraWhiteSpaces()
+        {
+            var source = @"> [AZURE.NOTE]
+>       This is azure note text
+>       Not code text
+>       We should ignore the extra white spaces at the beginning";
+            var expected = @"> [!NOTE]
+> This is azure note text
+> Not code text
+> We should ignore the extra white spaces at the beginning
+> 
+> 
+
+";
+            var result = AzureMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownRewriters_AzureNoteWithExtraWhiteSpacesNoLt()
+        {
+            var source = @"> [AZURE.NOTE]
+      This information applies to the Azure AD B2C consumer identity service preview.  For information on Azure AD for employees and organizations, 
+         please refer to the [Azure Active Directory Developer Guide](active-directory-developers-guide.md).";
+            var expected = @"> [!NOTE]
+> This information applies to the Azure AD B2C consumer identity service preview.  For information on Azure AD for employees and organizations, 
+> please refer to the [Azure Active Directory Developer Guide](active-directory-developers-guide.md).
 > 
 > 
 
@@ -611,7 +669,7 @@ this is absolute link [text](c:/this/is/markdown ""Local File"") file ref
 [Ref a non md resource in another docset](ex_resource/docset2Resource.html)
 ![Ref a image content in another docset](ex_resource/docset2Image.png)
 ![Ref a image content not in another docset](../docset2/docset2FakeImage.png)
-![Ref a abs path image content in another docset](c:\\docset2\fullNameImage.img)
+![Ref a abs path image content in another docset](c:\\docset2\\fullNameImage.img)
 ![Ref a abs http image content in another docset](https://google/images/fullNameImage.img)
 
 ";
@@ -681,7 +739,7 @@ this is absolute link [text](c:/this/is/markdown ""Local File"") file ref
         public void TestAzureMarkdownRewriters_LinkRefWithBackslash()
         {
             var source = @"[User-Defined Date/Time Formats (Format Function)](https://github.com/Azure-Samples/active-directory-java-webapp-openidconnect\/archive/complete.zip)";
-            var expected = @"[User-Defined Date/Time Formats (Format Function)](https://github.com/Azure-Samples/active-directory-java-webapp-openidconnect\/archive/complete.zip)
+            var expected = @"[User-Defined Date/Time Formats (Format Function)](https://github.com/Azure-Samples/active-directory-java-webapp-openidconnect\\/archive/complete.zip)
 
 ";
             var result = AzureMarked.Markup(source);
@@ -820,10 +878,10 @@ emptyString: """"
 title: Azure Container Service Introduction | Microsoft Azure
 description: Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.
 services: virtual-machines
-documentationcenter: 
+documentationcenter: ''
 author: rgardler
 manager: nepeters
-editor: 
+editor: ''
 tags: acs, azure-container-service
 keywords: Docker, Containers, Micro-services, Mesos, Azure
 ms.assetid: https://azure.microsoft.com/en-us/documentation/articles/azure_file
@@ -867,6 +925,20 @@ ms.author: rogardle
 ";
 
             var result = AzureMarked.Markup(source, sourceFilePath, azureMarkdownFileInfoMapping);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        [Trait("Bug 617364", "link with query condition")]
+        public void TestAzureMarkdownRewriters_AbsoluteLinkWithQueryCondition()
+        {
+            var source = @"[Microsoft Azure Active Directory Samples and Documentation](https://github.com/Azure-Samples?page=3&query=active-directory)";
+            var expected = @"[Microsoft Azure Active Directory Samples and Documentation](https://github.com/Azure-Samples?page=3&query=active-directory)
+
+";
+
+            var result = AzureMarked.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), result);
         }
 
@@ -1096,5 +1168,65 @@ This command must be run in the context of each domain user that has signed into
             var result = AzureMarked.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), result);
         }
+
+        #endregion
+
+        #region Azure migration marked
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownMigrationRewriters")]
+        public void TestAzureMarkdownMigrationRewriters_AzureVideoLink()
+        {
+            var azureVideoInfoMapping =
+                new Dictionary<string, AzureVideoInfo>{
+                    {
+                        "azure-ad--introduction-to-dynamic-memberships-for-groups",
+                        new AzureVideoInfo
+                        {
+                            Id = "azure-ad--introduction-to-dynamic-memberships-for-groups",
+                            Link = "https://channel9.msdn.com/Series/Azure-Active-Directory-Videos-Demos/Azure-AD--Introduction-to-Dynamic-Memberships-for-Groups/player/"
+                        }
+                    }
+                };
+
+            var source = @"> [AZURE.VIDEO azure-ad--introduction-to-dynamic-memberships-for-groups]";
+            var expected = @"> [!VIDEO https://channel9.msdn.com/Series/Azure-Active-Directory-Videos-Demos/Azure-AD--Introduction-to-Dynamic-Memberships-for-Groups/player/]
+> 
+> 
+
+";
+
+            var result = AzureMigrationMarked.Markup(source, "sourceFile.md", azureVideoInfoMapping: azureVideoInfoMapping);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownMigrationRewriters")]
+        public void TestAzureMarkdownMigrationRewriters_AzureVideoLinkNoMapping()
+        {
+            var azureVideoInfoMapping =
+                new Dictionary<string, AzureVideoInfo>{
+                    {
+                        "fake-azure-ad--introduction-to-dynamic-memberships-for-groups",
+                        new AzureVideoInfo
+                        {
+                            Id = "fake-azure-ad--introduction-to-dynamic-memberships-for-groups",
+                            Link = "https://channel9.msdn.com/Series/Azure-Active-Directory-Videos-Demos/Azure-AD--Introduction-to-Dynamic-Memberships-for-Groups/player/"
+                        }
+                    }
+                };
+
+            var source = @"> [AZURE.VIDEO azure-ad--introduction-to-dynamic-memberships-for-groups]";
+            var expected = @"> [!VIDEO azure-ad--introduction-to-dynamic-memberships-for-groups]
+> 
+> 
+
+";
+
+            var result = AzureMigrationMarked.Markup(source, "sourceFile.md", azureVideoInfoMapping: azureVideoInfoMapping);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        #endregion
     }
 }

@@ -18,7 +18,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
 
         public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer)
         {
-            throw new NotImplementedException();
+            throw new NotSupportedException();
         }
 
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
@@ -63,6 +63,17 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger.Internals
                     {
                         var swagger = (SwaggerValue)swaggerBase;
                         swagger.Token.WriteTo(writer);
+                    }
+                    break;
+                case SwaggerObjectType.LoopReference:
+                    {
+                        var swagger = (SwaggerLoopReferenceObject)swaggerBase;
+                        var jObject = new JObject();
+                        foreach (var i in swagger.Dictionary)
+                        {
+                            jObject.Add(i.Key, JToken.FromObject(i.Value, serializer));
+                        }
+                        jObject.WriteTo(writer);
                     }
                     break;
                 default:

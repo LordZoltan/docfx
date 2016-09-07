@@ -4,6 +4,7 @@
 namespace Microsoft.DocAsCode.Dfm.MarkdownValidators
 {
     using System.Collections.Generic;
+    using System.ComponentModel;
 
     using Newtonsoft.Json;
 
@@ -12,17 +13,22 @@ namespace Microsoft.DocAsCode.Dfm.MarkdownValidators
         /// <summary>
         /// The names of tag.
         /// </summary>
-        [JsonProperty("tagNames")]
+        [JsonProperty("tagNames", Required = Required.Always)]
         public List<string> TagNames { get; set; }
+        /// <summary>
+        /// The relation for tags.
+        /// </summary>
+        [JsonProperty("relation")]
+        public TagRelation Relation { get; set; }
         /// <summary>
         /// Define tag's behavior.
         /// </summary>
-        [JsonProperty("behavior")]
+        [JsonProperty("behavior", Required = Required.Always)]
         public TagValidationBehavior Behavior { get; set; }
         /// <summary>
         /// The message formatter for warning and error. '{0}' is name of tag, '{1}' is the full tag.
         /// </summary>
-        [JsonProperty("messageFormatter")]
+        [JsonProperty("messageFormatter", Required = Required.Always)]
         public string MessageFormatter { get; set; }
         /// <summary>
         /// The contract name for custom validator <see cref="Microsoft.DocAsCode.Plugins.ICustomMarkdownTagValidator"/>.
@@ -34,5 +40,11 @@ namespace Microsoft.DocAsCode.Dfm.MarkdownValidators
         /// </summary>
         [JsonProperty("openingTagOnly")]
         public bool OpeningTagOnly { get; set; }
+        /// <summary>
+        /// Whether to disable this rule by default.
+        /// </summary>
+        [DefaultValue(false)]
+        [JsonProperty("disable")]
+        public bool Disable { get; set; }
     }
 }

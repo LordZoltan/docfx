@@ -12,6 +12,7 @@ let program = require('commander');
 let request = require('request');
 let jszip = require('jszip');
 let nconf = require('nconf');
+let sha1 = require('sha1');
 
 nconf.add('configuration', {type: 'file', file: path.join(__dirname, 'config.json')});
 let config = {};
@@ -19,6 +20,7 @@ config.docfx = nconf.get('docfx');
 config.myget = nconf.get('myget');
 config.msbuild = nconf.get('msbuild');
 config.git = nconf.get('git');
+config.choco = nconf.get('choco');
 
 if (config.myget) {
   config.myget.apiKey = process.env.MGAPIKEY;
@@ -191,6 +193,7 @@ function zipAssetsPromiseFn(fromDir, destDir) {
     let buffer = zip.generate({type:"nodebuffer", compression: "DEFLATE"});
     fs.unlinkSync(destDir);
     fs.writeFileSync(destDir, buffer);
+    globalOptions.sha1 = "$sha1       = '" + sha1(buffer) + "'";
     logger.info("Finish zipping assets");
     return Promise.resolve();
   }
@@ -227,7 +230,7 @@ function parseReleaseNotePromiseFn(){
           globalOptions.version = lines[record[0] - 1];
           globalOptions.content = lines.slice(record[0] + 1, record[1] - 2).join('\n');
         }
-
+        globalOptions.rawVersion = globalOptions.version.slice(1);
         logger.info("Finish parsing RELEASENOTE");
         resolve();
       });
@@ -242,7 +245,7 @@ function createReleasePromiseFn() {
       if (!process.env.TOKEN) {
         reject(new Error('No github account token in the environment.'));
       }
-      if (!globalOptions.version || !globalOptions.version.slice(1).trim()) {
+      if (!globalOptions.rawVersion) {
         reject(new Error('Empty version number is not allowed'));
       }
 
@@ -257,7 +260,7 @@ function createReleasePromiseFn() {
         body: {
           "tag_name": globalOptions.version,
           "target_commitish": "master",
-          "name": "Version " + globalOptions.version.slice(1),
+          "name": "Version " + globalOptions.rawVersion,
           "body": globalOptions.content || ""
         }
       }
@@ -394,12 +397,47 @@ function updateReleasePromiseFn() {
     return new Promise(function(resolve, reject) {
       getLastestReleasePromiseFn()().then(function() {
         let promiseFn = globalOptions.tag_name === globalOptions.version ? deleteAssetsPromiseFn() : createReleasePromiseFn();
-        promiseFn().then(function() {
-          resolve();
-        }).catch(function(err) {
-          reject(err);
-        });
+        promiseFn().then(resolve).catch(reject);
       });
+    });
+  }
+}
+
+function updateChocoConfigPromiseFn() {
+  return function() {
+    return new Promise(function(resolve, reject) {
+      if (!process.env.CHOCO_TOKEN) {
+        reject(new Error('No chocolatey.org account token in the environment.'));
+      }
+      if (!globalOptions.rawVersion) {
+        reject(new Error('rawVersion can not be null/empty/undefined when update choco config file'));
+      }
+      // update chocolateyinstall.ps1
+      let chocoScriptContent = fs.readFileSync(config.choco.chocoScript, "utf8");
+      chocoScriptContent = chocoScriptContent
+                  .replace(/v[\d\.]+/, globalOptions.version)
+                  .replace(/^(\$sha1\s+=\s+')[\d\w]+(')$/gm, globalOptions.sha1);
+      fs.writeFileSync(config.choco.chocoScript, chocoScriptContent);
+
+      // update docfx.nuspec
+      let nuspecContent = fs.readFileSync(config.choco.nuspec, "utf8");
+      nuspecContent = nuspecContent.replace(/(<version>)[\d\.]+(<\/version>)/, '$1' + globalOptions.rawVersion + '$2')
+      fs.writeFileSync(config.choco.nuspec, nuspecContent);
+
+      globalOptions.pkgName = "docfx." + globalOptions.rawVersion + ".nupkg";
+      resolve();
+    });
+  }
+}
+
+function pushChocoPackage() {
+  return function() {
+    return new Promise(function(resolve, reject) {
+      if (!globalOptions.pkgName) {
+        reject(new Error('package name can not be null/empty/undefined while pushing choco package'));
+      }
+      let promiseFn = execPromiseFn('choco', ['push', globalOptions.pkgName], config.choco.homeDir);
+      promiseFn().then(resolve).catch(reject);
     });
   }
 }
@@ -443,6 +481,16 @@ let updateGithubReleaseStep = function() {
     loadZipPromiseFn(),
     updateReleasePromiseFn(),
     uploadAssetsPromiseFn()
+  ];
+  return serialPromiseFlow(stepsOrder);
+}
+
+let updateChocoReleaseStep = function() {
+  let stepsOrder = [
+    updateChocoConfigPromiseFn(),
+    execPromiseFn("choco", ['pack'], config.choco.homeDir),
+    execPromiseFn("choco", ['apiKey', '-k', process.env.CHOCO_TOKEN, '-source', 'https://chocolatey.org/', config.choco.homeDir]),
+    pushChocoPackage()
   ];
   return serialPromiseFlow(stepsOrder);
 }
@@ -498,15 +546,16 @@ switch (branchValue.toLowerCase()) {
       e2eTestStep,
       // step4: run docfx.exe to generate documentation
       genereateDocsStep,
-      // step5: upload release to myget.org
-      uploadMasterMygetStep,
-      // step6: update gh-pages
+      // step5: update gh-pages
       updateGhPageStep,
-      // step7: zip and upload release
-      updateGithubReleaseStep
+      // step6: zip and upload release
+      updateGithubReleaseStep,
+      // step7: upload to chocolatey.org
+      updateChocoReleaseStep,
+      // step8: upload release to myget.org
+      uploadMasterMygetStep
     ]);
     break;
   default:
     logger.error("Please specify the *right* repo branch name to run this script");
 }
-

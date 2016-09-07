@@ -4,51 +4,109 @@ PUSHD %~dp0
 SETLOCAL
 SETLOCAL ENABLEDELAYEDEXPANSION
 
+:Loop
+if [%1]==[] GOTO Begin
+
+if /I [%1]==[Debug] (
+    SET Configuration=%1
+    GOTO Next
+)
+
+if /I [%1]==[Release] (
+    SET Configuration=%1
+    GOTO Next
+)
+
+if /I [%1]==[PROD] (
+    SET Environment=PROD
+    GOTO Next
+)
+
+if /I [%1]==[raw] (
+    SET SkipTemplate=true
+    GOTO Next
+)
+if /I [%1]==[template] (
+    SET UpdateTemplate=%1
+    GOTO Next
+)
+if /I [%1]==[nonnetcore] (
+    SET OnlyNonNetCore=true
+    GOTO Next
+)
+REM TODO: remove it in next sprint
+if /I [%1]==[nondnx] (
+    SET OnlyNonNetCore=true
+    GOTO Next
+)
+
+:Next
+SHIFT /1
+GOTO Loop
+
+:Begin
 IF NOT DEFINED VisualStudioVersion (
     IF DEFINED VS140COMNTOOLS (
         CALL "%VS140COMNTOOLS%\VsDevCmd.bat"
-        GOTO :EnvSet
+        GOTO EnvSet
     )
 
     ECHO Error: build.cmd requires Visual Studio 2015.
     SET ERRORLEVEL=1
-    GOTO :Exit
+    GOTO Exit
 )
 
 :EnvSet
 SET BuildProj=%~dp0All.sln
-SET Configuration=%1
-IF '%Configuration%'=='' (
+IF [%Configuration%]==[] (
     SET Configuration=Release
 )
-SET Environment=%2
-IF '%Environment%'=='PROD' (
+IF /I [%Environment%]==[PROD] (
     ECHO Updating version for PROD environment
     CALL UpdateVersion.cmd
 
-    IF NOT '!ERRORLEVEL!'=='0' (
+    IF NOT [!ERRORLEVEL!]==[0] (
         ECHO ERROR: Error occurs when updating version
-        GOTO :Exit
+        GOTO Exit
     )
 )
-
-:: Check if DNU exists globally
-:: DNU is OPTIONAL
-WHERE dnu >NUL
-IF NOT '%ERRORLEVEL%'=='0' (
-    ECHO ERROR: DNU is not successfully configured.
-    ECHO ERROR: Please follow http://docs.asp.net/en/latest/getting-started/installing-on-windows.html#install-the-net-version-manager-dnvm to install dnvm.
-    ECHO ERROR: If dnvm is installed, use `dnvm list` to show available dnx runtime, and use `dnvm use` to select the default dnx runtime
-    GOTO :Exit
+IF /I [%UpdateTemplate%]==[template] (
+    ECHO Updating template
+    CALL UpdateTemplate.cmd
+    IF NOT [!ERRORLEVEL!]==[0] (
+        ECHO ERROR: Error occurs when updating template
+    )
+    GOTO Exit
+)
+IF /I [%SkipTemplate%]==[true] (
+    ECHO Skip updating template
+    GOTO CheckIfOnlyBuildNonDnx
 )
 
 :: Update template before build
+:UpdateTemplate
 ECHO Updating template
 CALL UpdateTemplate.cmd
-
-IF NOT '!ERRORLEVEL!'=='0' (
+IF NOT [!ERRORLEVEL!]==[0] (
     ECHO ERROR: Error occurs when updating template
-    GOTO :Exit
+    GOTO Exit
+)
+
+:CheckIfOnlyBuildNonDnx
+IF /I [%OnlyNonNetCore%]==[true] (
+    ECHO Only build NonNETCore.sln
+    SET BuildProj=%~dp0NonNETCore.sln
+    CALL :RestoreNormalPackage
+    GOTO SetBuildLog
+)
+
+:: Check if dotnet cli exists globally
+:CheckDotnetCli
+WHERE dotnet >NUL
+IF NOT [!ERRORLEVEL!]==[0] (
+    ECHO ERROR: dotnet CLI is not successfully configured.
+    ECHO ERROR: Please follow https://www.microsoft.com/net/core to install .NET Core.
+    GOTO Exit
 )
 
 :: Restore packages for .csproj projects
@@ -56,6 +114,7 @@ IF NOT '!ERRORLEVEL!'=='0' (
 CALL :RestorePackage
 
 :: Log build command line
+:SetBuildLog
 SET BuildLog=%~dp0msbuild.log
 SET BuildPrefix=echo
 SET BuildPostfix=^> "%BuildLog%"
@@ -67,13 +126,14 @@ SET BuildPrefix=
 SET BuildPostfix=
 CALL :Build %*
 
-IF NOT '%ErrorLevel%'=='0' (
-    GOTO :AfterBuild
+IF NOT [!ERRORLEVEL!]==[0] (
+    GOTO AfterBuild
 )
 
 POPD
 
 :AfterBuild
+CALL :GenerateArtifacts
 
 :: Pull the build summary from the log file
 ECHO.
@@ -88,41 +148,49 @@ findstr /ir /c:"Total:.*Failed.*Skipped.*Time.*" "%BuildLog%" & cd >nul
 ECHO Exit Code: %BuildErrorLevel%
 SET ERRORLEVEL=%BuildErrorLevel%
 
-GOTO :Exit
+GOTO Exit
 
 :Build
+REM remove for dotnet cli bug https://github.com/dotnet/cli/issues/2871
+REM dotnet build src\docfx -c %Configuration% -o target\%Configuration%\docfx.cli -f net452
+dotnet build src\docfx -c %Configuration% -f net452
+XCOPY /ey src\docfx\bin\%Configuration%\net452\win7-x64\** target\%Configuration%\docfx.cli\
 %BuildPrefix% msbuild "%BuildProj%" /p:Configuration=%Configuration% /nologo /maxcpucount:1 /verbosity:minimal /nodeReuse:false /fileloggerparameters:Verbosity=d;LogFile="%BuildLog%"; %BuildPostfix%
 SET BuildErrorLevel=%ERRORLEVEL%
 EXIT /B %ERRORLEVEL%
 
-:RestorePackage
-
-:RestoreDnuPackage
-FOR /D %%x IN ("src","test","tools") DO (
-    PUSHD %%x
-    CMD /C dnu restore --parallel
-    POPD
+:GenerateArtifacts
+ECHO pack nuget package
+FOR /f %%g IN ('DIR /b "src"') DO (
+    CMD /C dotnet pack src\%%g -c Release -o artifacts\Release
 )
+
+:RestorePackage
 
 :RestoreNormalPackage
 :: Currently version 3.3 is not compatible with our build, force to use v2.8.6
 SET CachedNuget=%LocalAppData%\NuGet\v2.8.6\NuGet.exe
-IF EXIST "%CachedNuget%" GOTO :Restore
+IF EXIST "%CachedNuget%" GOTO Restore
 ECHO Downloading NuGet.exe v2.8.6...
 IF NOT EXIST "%LocalAppData%\NuGet\v2.8.6" MD "%LocalAppData%\NuGet\v2.8.6"
 powershell -NoProfile -ExecutionPolicy UnRestricted -Command "$ProgressPreference = 'SilentlyContinue'; [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultCredentials; Invoke-WebRequest 'https://dist.nuget.org/win-x86-commandline/v2.8.6/nuget.exe' -OutFile '%CachedNuget%'"
 
-IF NOT '%ErrorLevel%'=='0' (
+IF NOT [!ERRORLEVEL!]==[0] (
     ECHO ERROR: Failed downloading NuGet.exe
-    GOTO :Exit
+    GOTO Exit
 )
 
 :Restore
 %CachedNuget% restore "%BuildProj%"
-
-IF NOT '%ErrorLevel%'=='0' (
+IF NOT [!ERRORLEVEL!]==[0] (
     ECHO ERROR: Error when restoring packages for %BuildProj%
-    GOTO :Exit
+)
+
+:RestoreDnuPackage
+FOR /D %%x IN ("src") DO (
+    PUSHD %%x
+    CMD /C dotnet restore
+    POPD
 )
 
 :Exit

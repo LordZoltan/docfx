@@ -13,23 +13,30 @@ namespace Microsoft.DocAsCode.Build.RestApi
 
     using Microsoft.DocAsCode.Build.Common;
     using Microsoft.DocAsCode.Build.RestApi.Swagger;
-    using Microsoft.DocAsCode.Build.RestApi.ViewModels;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
+    using Microsoft.DocAsCode.DataContracts.RestApi;
     using Microsoft.DocAsCode.Plugins;
     using Microsoft.DocAsCode.Utility;
+
+    using Newtonsoft.Json;
+    using Newtonsoft.Json.Linq;
 
     [Export(typeof(IDocumentProcessor))]
     public class RestApiDocumentProcessor : DisposableDocumentProcessor
     {
         private const string RestApiDocumentType = "RestApi";
         private const string DocumentTypeKey = "documentType";
-        private static readonly string[] SupportedFileEndings = new string[]
+
+        // To keep backward compatibility, still support and change previous file endings by first mapping sequence.
+        // Take 'a.b_swagger2.json' for an example, the json file name would be changed to 'a.b', then the html file name would be 'a.b.html'.
+        private static readonly string[] SupportedFileEndings =
         {
            "_swagger2.json",
            "_swagger.json",
            ".swagger.json",
            ".swagger2.json",
+           ".json",
         };
 
         [ImportMany(nameof(RestApiDocumentProcessor))]
@@ -42,7 +49,7 @@ namespace Microsoft.DocAsCode.Build.RestApi
             switch (file.Type)
             {
                 case DocumentType.Article:
-                    if (IsSupportedFile(file.File))
+                    if (IsSupportedFile(file.FullPath))
                     {
                         return ProcessingPriority.Normal;
                     }
@@ -76,19 +83,16 @@ namespace Microsoft.DocAsCode.Build.RestApi
                     }
 
                     swagger.Metadata = MergeMetadata(swagger.Metadata, metadata);
-                    var vm = RestApiRootItemViewModel.FromSwaggerModel(swagger);
-                    var displayLocalPath = repoInfo?.RelativePath ?? filePath.ToDisplayPath();
-                    return new FileModel(file, vm, serializer: new BinaryFormatter())
+                    var vm = SwaggerModelConverter.FromSwaggerModel(swagger);
+                    var displayLocalPath = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, file.FullPath);
+
+                    return new FileModel(file, vm, serializer: Environment.Is64BitProcess ? null : new BinaryFormatter())
                     {
                         Uids = new[] { new UidDefinition(vm.Uid, displayLocalPath) }
                             .Concat(from item in vm.Children select new UidDefinition(item.Uid, displayLocalPath))
                             .Concat(from tag in vm.Tags select new UidDefinition(tag.Uid, displayLocalPath)).ToImmutableArray(),
-                        LocalPathFromRepoRoot = displayLocalPath,
-                        Properties =
-                        {
-                            LinkToFiles = new HashSet<string>(),
-                            LinkToUids = new HashSet<string>(),
-                        },
+                        LocalPathFromRepoRoot = repoInfo?.RelativePath ?? filePath.ToDisplayPath(),
+                        LocalPathFromRoot = displayLocalPath
                     };
                 case DocumentType.Overwrite:
                     // TODO: Refactor current behavior that overwrite file is read multiple times by multiple processors
@@ -117,26 +121,59 @@ namespace Microsoft.DocAsCode.Build.RestApi
             {
                 DocumentType = documentType ?? RestApiDocumentType,
                 FileWithoutExtension = Path.ChangeExtension(model.File, null),
-                LinkToFiles = ((HashSet<string>)model.Properties.LinkToFiles).ToImmutableArray(),
-                LinkToUids = ((HashSet<string>)model.Properties.LinkToUids).ToImmutableHashSet(),
+                LinkToFiles = model.LinkToFiles.ToImmutableArray(),
+                LinkToUids = model.LinkToUids,
+                FileLinkSources = model.FileLinkSources,
+                UidLinkSources = model.UidLinkSources,
             };
         }
 
         #region Private methods
 
-        private bool IsSupportedFile(string file)
+        private static bool IsSupportedFile(string filePath)
         {
-            return SupportedFileEndings.Any(s => IsSupported(file, s));
+            return SupportedFileEndings.Any(s => IsSupportedFileEnding(filePath, s)) && IsSwaggerFile(filePath);
         }
 
-        private bool IsSupported(string file, string fileEnding)
+        private static bool IsSupportedFileEnding(string filePath, string fileEnding)
         {
-            return file.EndsWith(fileEnding, StringComparison.OrdinalIgnoreCase);
+            return filePath.EndsWith(fileEnding, StringComparison.OrdinalIgnoreCase);
         }
 
-        private string ChangeFileExtension(string file)
+        private static bool IsSwaggerFile(string filePath)
         {
-            return file.Substring(0, file.Length - SupportedFileEndings.First(s => IsSupported(file, s)).Length) + ".json";
+            try
+            {
+                using (var streamReader = File.OpenText(filePath))
+                using (JsonReader reader = new JsonTextReader(streamReader))
+                {
+                    var jObject = JObject.Load(reader);
+                    JToken swaggerValue;
+                    if (jObject.TryGetValue("swagger", out swaggerValue))
+                    {
+                        var swaggerString = (string)swaggerValue;
+                        if (swaggerString != null && swaggerString.Equals("2.0"))
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch (FileNotFoundException ex)
+            {
+                Logger.LogVerbose($"In {nameof(RestApiDocumentProcessor)}, could not find {filePath}, exception details: {ex.Message}.");
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogVerbose($"In {nameof(RestApiDocumentProcessor)}, could not deserialize {filePath} to JObject, exception details: {ex.Message}.");
+            }
+
+            return false;
+        }
+
+        private static string ChangeFileExtension(string file)
+        {
+            return file.Substring(0, file.Length - SupportedFileEndings.First(s => IsSupportedFileEnding(file, s)).Length) + ".json";
         }
 
         private static Dictionary<string, object> MergeMetadata(IDictionary<string, object> item, IDictionary<string, object> overwriteItems)

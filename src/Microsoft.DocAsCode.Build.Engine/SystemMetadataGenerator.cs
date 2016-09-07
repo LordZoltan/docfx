@@ -15,6 +15,7 @@ namespace Microsoft.DocAsCode.Build.Engine
     {
         private readonly IDocumentBuildContext _context;
         private readonly IEnumerable<FileInfo> _toc;
+
         public SystemMetadataGenerator(IDocumentBuildContext context)
         {
             if (context == null)
@@ -31,7 +32,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                 .OrderBy(s => s.File.SubdirectoryCount);
         }
 
-        public SystemMetadata Generate(ManifestItem item)
+        public SystemMetadata Generate(InternalManifestItem item)
         {
             var attrs = new SystemMetadata
             {
@@ -81,11 +82,11 @@ namespace Microsoft.DocAsCode.Build.Engine
                 var tocRelativePath = parentTocPath.MakeRelativeTo(file);
                 attrs.RelativePathToToc = tocRelativePath;
                 attrs.TocKey = parentToc.Key;
-                Logger.LogVerbose($"TOC file {parentTocPath} is found for {item.LocalPathFromRepoRoot}.");
+                Logger.LogVerbose($"TOC file {parentTocPath} is found for {item.LocalPathFromRoot}.");
             }
             else
             {
-                Logger.LogVerbose($"TOC file for {item.LocalPathFromRepoRoot} is not found.");
+                Logger.LogVerbose($"TOC file for {item.LocalPathFromRoot} is not found.");
             }
 
             return attrs;

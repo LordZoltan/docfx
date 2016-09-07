@@ -12,6 +12,7 @@ namespace Microsoft.DocAsCode.Build.Engine
     using System.Net.Http;
     using System.Threading.Tasks;
 
+    using Microsoft.DocAsCode.Build.Engine.Incrementals;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.Plugins;
@@ -22,7 +23,7 @@ namespace Microsoft.DocAsCode.Build.Engine
         private readonly Dictionary<string, TocInfo> _tableOfContents = new Dictionary<string, TocInfo>(FilePathComparer.OSPlatformSensitiveStringComparer);
         private readonly Task<IXRefContainerReader> _reader;
 
-        public DocumentBuildContext(string buildOutputFolder) : this(buildOutputFolder, Enumerable.Empty<FileAndType>(), ImmutableArray<string>.Empty, ImmutableArray<string>.Empty, 1, Environment.CurrentDirectory) { }
+        public DocumentBuildContext(string buildOutputFolder) : this(buildOutputFolder, Enumerable.Empty<FileAndType>(), ImmutableArray<string>.Empty, ImmutableArray<string>.Empty, 1, Directory.GetCurrentDirectory()) { }
 
         public DocumentBuildContext(
             string buildOutputFolder,
@@ -57,11 +58,17 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public Dictionary<string, string> FileMap { get; } = new Dictionary<string, string>(FilePathComparer.OSPlatformSensitiveStringComparer);
 
-        public Dictionary<string, XRefSpec> XRefSpecMap { get; } = new Dictionary<string, XRefSpec>();
+        public ConcurrentDictionary<string, XRefSpec> XRefSpecMap { get; } = new ConcurrentDictionary<string, XRefSpec>();
 
         public Dictionary<string, HashSet<string>> TocMap { get; } = new Dictionary<string, HashSet<string>>(FilePathComparer.OSPlatformSensitiveStringComparer);
 
         public HashSet<string> XRef { get; } = new HashSet<string>();
+
+        public DependencyGraph DependencyGraph { get; } = new DependencyGraph();
+
+        internal Dictionary<string, ChangeKindWithDependency> ChangeDict { get; } = new Dictionary<string, ChangeKindWithDependency>();
+
+        internal ConcurrentBag<ManifestItem> ManifestItems { get; } = new ConcurrentBag<ManifestItem>();
 
         private ConcurrentDictionary<string, XRefSpec> ExternalXRefSpec { get; } = new ConcurrentDictionary<string, XRefSpec>();
 
@@ -359,14 +366,7 @@ namespace Microsoft.DocAsCode.Build.Engine
             {
                 return null;
             }
-            using (var sw = new StringWriter())
-            {
-                YamlUtility.Serialize(sw, vm);
-                using (var sr = new StringReader(sw.ToString()))
-                {
-                    return YamlUtility.Deserialize<XRefSpec>(sr);
-                }
-            }
+            return YamlUtility.ConvertTo<XRefSpec>(vm);
         }
     }
 }

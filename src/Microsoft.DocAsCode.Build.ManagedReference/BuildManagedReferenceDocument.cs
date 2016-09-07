@@ -56,8 +56,8 @@ namespace Microsoft.DocAsCode.Build.ManagedReference
             linkToUids.UnionWith(item.Inheritance ?? EmptyEnumerable);
             linkToUids.UnionWith(item.InheritedMembers ?? EmptyEnumerable);
             linkToUids.UnionWith(item.Implements ?? EmptyEnumerable);
-            linkToUids.UnionWith(item.SeeAlsos?.Select(s => s.Type) ?? EmptyEnumerable);
-            linkToUids.UnionWith(item.Sees?.Select(s => s.Type) ?? EmptyEnumerable);
+            linkToUids.UnionWith(item.SeeAlsos?.Where(s => s.LinkType == LinkType.CRef)?.Select(s => s.LinkId) ?? EmptyEnumerable);
+            linkToUids.UnionWith(item.Sees?.Where(s => s.LinkType == LinkType.CRef)?.Select(s => s.LinkId) ?? EmptyEnumerable);
 
             if (item.Overridden != null)
             {
@@ -92,7 +92,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference
                 }
             }
 
-            ((HashSet<string>)model.Properties.LinkToUids).UnionWith(linkToUids);
+            model.LinkToUids = model.LinkToUids.Union(linkToUids);
             return item;
         }
 
@@ -125,8 +125,39 @@ namespace Microsoft.DocAsCode.Build.ManagedReference
             }
 
             var mr = host.Markup(markdown, model.FileAndType);
-            ((HashSet<string>)model.Properties.LinkToFiles).UnionWith(mr.LinkToFiles);
-            ((HashSet<string>)model.Properties.LinkToUids).UnionWith(mr.LinkToUids);
+            model.LinkToFiles = model.LinkToFiles.Union(mr.LinkToFiles);
+            model.LinkToUids = model.LinkToUids.Union(mr.LinkToUids);
+
+            var fls = model.FileLinkSources.ToDictionary(p => p.Key, p => p.Value);
+            foreach (var pair in mr.FileLinkSources)
+            {
+                ImmutableList<LinkSourceInfo> list;
+                if (fls.TryGetValue(pair.Key, out list))
+                {
+                    fls[pair.Key] = list.AddRange(pair.Value);
+                }
+                else
+                {
+                    fls[pair.Key] = pair.Value;
+                }
+            }
+            model.FileLinkSources = fls.ToImmutableDictionary();
+
+            var uls = model.UidLinkSources.ToDictionary(p => p.Key, p => p.Value);
+            foreach (var pair in mr.UidLinkSources)
+            {
+                ImmutableList<LinkSourceInfo> list;
+                if (uls.TryGetValue(pair.Key, out list))
+                {
+                    uls[pair.Key] = list.AddRange(pair.Value);
+                }
+                else
+                {
+                    uls[pair.Key] = pair.Value;
+                }
+            }
+            model.UidLinkSources = uls.ToImmutableDictionary();
+
             return mr.Html;
         }
 

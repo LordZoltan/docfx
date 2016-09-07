@@ -99,16 +99,28 @@ Please refer to [*DocFX* User Manual](docfx.exe_user_manual.md) for detailed des
 
 5. Build from source code
 ----------------
-As a prerequisite, you need to install [Microsoft Build Tools 2015](https://www.microsoft.com/en-us/download/details.aspx?id=48159).
+#### Build without DNX
+There're two options:
+
+1. Run `build nondnx` under *DocFX* code repo
+2. Open `NonDNX.sln` under *DocFX* code repo in Visual Studio and build it.
+
+#### Build with DNX
+As a prerequisite, you need:
+- [Microsoft Build Tools 2015](https://www.microsoft.com/en-us/download/details.aspx?id=48159)
+- [DNVM](http://docs.asp.net/en/latest/getting-started/installing-on-windows.html#install-the-net-version-manager-dnvm)
+- [Node.js](https://nodejs.org)
 
 *Step1.* `git clone https://github.com/dotnet/docfx.git` to get the latest code.
 
-*Step2.* Run `build.cmd` under root folder.
+*Step2.* `dnvm install 1.0.0-rc1-final`
 
-*Step3.* Add `artifacts` folder to nuget source by in IDE:
+*Step3.* Run `build.cmd` under root folder.
+
+*Step4.* Add `artifacts` folder to nuget source by in IDE:
   > Tools > NuGet Package Manager > Package Manager Settings > Package Sources
 
-*Step4.* Follow steps in #2, #3, #4 to use *DocFX* in command-line, IDE or DNX.
+*Step5.* Follow steps in #2, #3, #4 to use *DocFX* in command-line, IDE or DNX.
 
 6. A seed project to play with *DocFX*
 -------------------------
@@ -121,7 +133,7 @@ Here is a seed project https://github.com/docascode/docfx-seed. It contains
 5. `docfx.json` under root folder. It is the configuration file that `docfx` depends upon.
 
 > Tip:
-  It is a good practice to seperate files with different type into different folders.
+  It is a good practice to separate files with different type into different folders.
 
 7. Q&A
 -------------------------

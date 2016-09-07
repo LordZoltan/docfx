@@ -100,15 +100,15 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
 
         [YamlMember(Alias = "exceptions")]
         [JsonProperty("exceptions")]
-        public List<ApiCrefInfoBuildOutput> Exceptions { get; set; }
+        public List<ApiExceptionInfoBuildOutput> Exceptions { get; set; }
 
         [YamlMember(Alias = "seealso")]
         [JsonProperty("seealso")]
-        public List<ApiCrefInfoBuildOutput> SeeAlsos { get; set; }
+        public List<ApiLinkInfoBuildOutput> SeeAlsos { get; set; }
 
         [YamlMember(Alias = "see")]
         [JsonProperty("see")]
-        public List<ApiCrefInfoBuildOutput> Sees { get; set; }
+        public List<ApiLinkInfoBuildOutput> Sees { get; set; }
 
         [YamlMember(Alias = "inheritance")]
         [JsonProperty("inheritance")]
@@ -232,8 +232,8 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Remarks = vm.Remarks,
                 Examples = vm.Examples,
                 Overridden = ApiNames.FromUid(vm.Overridden),
-                SeeAlsos = vm.SeeAlsos?.Select(s => ApiCrefInfoBuildOutput.FromModel(s)).ToList(),
-                Sees = vm.Sees?.Select(s => ApiCrefInfoBuildOutput.FromModel(s)).ToList(),
+                SeeAlsos = vm.SeeAlsos?.Select(s => ApiLinkInfoBuildOutput.FromModel(s)).ToList(),
+                Sees = vm.Sees?.Select(s => ApiLinkInfoBuildOutput.FromModel(s)).ToList(),
                 Inheritance = vm.Inheritance?.Select(i => FromUid(i)).ToList(),
                 Implements = vm.Implements?.Select(i => ApiNames.FromUid(i)).ToList(),
                 InheritedMembers = vm.InheritedMembers,
@@ -242,7 +242,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Conceptual = vm.Conceptual,
                 Metadata = vm.Metadata,
                 Syntax = ApiSyntaxBuildOutput.FromModel(vm.Syntax, vm.SupportedLanguages),
-                Exceptions = vm.Exceptions?.Select(s => ApiCrefInfoBuildOutput.FromModel(s)).ToList(),
+                Exceptions = vm.Exceptions?.Select(s => ApiExceptionInfoBuildOutput.FromModel(s)).ToList(),
             };
             output.Metadata["type"] = vm.Type;
             output.Metadata["summary"] = vm.Summary;
@@ -269,7 +269,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
         {
             if (specs != null && specs.Count > 0)
             {
-                return specs.Select(kv => new ApiLanguageValuePair() { Language = kv.Key, Value = GetSpecName(kv.Value) }).ToList();
+                return specs.Where(kv => supportedLanguages.Contains(kv.Key)).Select(kv => new ApiLanguageValuePair() { Language = kv.Key, Value = GetSpecName(kv.Value) }).ToList();
             }
             if (!string.IsNullOrEmpty(xref))
             {
