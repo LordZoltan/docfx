@@ -754,6 +754,18 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
                     MessageFormatter = "Warning tag({0})!",
                     Behavior = TagValidationBehavior.Warning,
                 },
+                new MarkdownTagValidationRule
+                {
+                    TagNames = new List<string> { "script" },
+                    MessageFormatter = "Warning tag({0})!",
+                    Behavior = TagValidationBehavior.Warning,
+                },
+                new MarkdownTagValidationRule
+                {
+                    TagNames = new List<string> { "code" },
+                    MessageFormatter = "Warning tag({0})!",
+                    Behavior = TagValidationBehavior.Warning,
+                },
             });
             mrb.AddValidators(new[]
             {
@@ -770,12 +782,26 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
             string result;
             using (new LoggerPhaseScope("test!!!!"))
             {
-                result = engine.Markup(@"<div><i>x</i><EM>y</EM><h1>z</h1></div>", "test");
+                result = engine.Markup(@"<div><i>x</i><EM>y</EM><h1>z<code>a*b*c</code></h1></div>
+
+<script>alert(1);</script>", "test");
             }
             Logger.UnregisterListener(listener);
-            Assert.Equal("<div><i>x</i><EM>y</EM><h1>z</h1></div>", result);
-            Assert.Equal(5, listener.Items.Count);
-            Assert.Equal(new[] { HtmlMarkdownTokenValidatorProvider.WarningMessage, "Invalid tag(div)!", "Invalid tag(EM)!", "Warning tag(h1)!", "Warning tag(h1)!" }, from item in listener.Items select item.Message);
+            Assert.Equal(@"<div><i>x</i><EM>y</EM><h1>z<code>a*b*c</code></h1></div>
+
+<script>alert(1);</script>".Replace("\r\n", "\n"), result);
+            Assert.Equal(8, listener.Items.Count);
+            Assert.Equal(new[]
+            {
+                HtmlMarkdownTokenValidatorProvider.WarningMessage,
+                "Invalid tag(div)!",
+                "Invalid tag(EM)!",
+                "Warning tag(h1)!",
+                "Warning tag(code)!",
+                "Warning tag(h1)!",
+                "Html Tag!",
+                "Warning tag(script)!",
+            }, from item in listener.Items select item.Message);
         }
 
         [Fact]
@@ -787,6 +813,35 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
 [!Code-FakeREST-i[REST-i](api.json ""This is root"")]
 [!CODE[No Language](api.json)]
 [!code-js[empty](api.json)]
+";
+
+            var apiJsonContent = @"
+{
+   ""method"": ""GET"",
+   ""resourceFormat"": ""https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End"",
+   ""requestUrl"": ""https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End"",
+   ""requestHeaders"": {
+                ""Accept"": ""application/json""
+   }
+}";
+            File.WriteAllText("api.json", apiJsonContent.Replace("\r\n", "\n"));
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "api.json", dependency: dependency);
+            Assert.Equal("<pre><code class=\"lang-FakeREST\" name=\"REST\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre><pre><code class=\"lang-FakeREST-i\" name=\"REST-i\" title=\"This is root\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre><pre><code name=\"No Language\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre><pre><code class=\"lang-js\" name=\"empty\">\n{\n   &quot;method&quot;: &quot;GET&quot;,\n   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,\n   &quot;requestHeaders&quot;: {\n                &quot;Accept&quot;: &quot;application/json&quot;\n   }\n}\n</code></pre>", marked);
+            Assert.Equal(
+                new[] { "api.json" },
+                dependency.OrderBy(x => x));
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmFencesBlockLevelWithWhitespaceLeading()
+        {
+            var root = @"
+ [!code-FakeREST[REST](api.json)]
+  [!Code-FakeREST-i[REST-i](api.json ""This is root"")]
+   [!CODE[No Language](api.json)]
+  [!code-js[empty](api.json)]
 ";
 
             var apiJsonContent = @"
@@ -1102,5 +1157,169 @@ public static void Foo()
                 Directory.CreateDirectory(dir);
             File.WriteAllText(file, content);
         }
+
+        #region Fallback folders testing
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestFallback_Inclusion_random_name()
+        {
+            // -root_folder (this is also docset folder)
+            //  |- root.md
+            //  |- a_folder
+            //  |  |- a.md
+            //  |- token_folder
+            //  |  |- token1.md
+            // -fallback_folder
+            //  |- token_folder
+            //     |- token2.md
+
+            // 1. Prepare data
+            var uniqueFolderName = Path.GetRandomFileName();
+            var root = $@"1markdown root.md main content start.
+
+[!include[a](a_folder_{uniqueFolderName}/a_{uniqueFolderName}.md ""This is a.md"")]
+
+markdown root.md main content end.";
+
+            var a = $@"1markdown a.md main content start.
+
+[!include[token1](../token_folder_{uniqueFolderName}/token1_{uniqueFolderName}.md ""This is token1.md"")]
+[!include[token1](../token_folder_{uniqueFolderName}/token2_{uniqueFolderName}.md ""This is token2.md"")]
+
+markdown a.md main content end.";
+
+            var token1 = $@"1markdown token1.md content start.
+
+[!include[token2](token2_{uniqueFolderName}.md ""This is token2.md"")]
+
+markdown token1.md content end.";
+
+            var token2 = @"**1markdown token2.md main content**";
+
+            WriteToFile($"{uniqueFolderName}/root_folder_{uniqueFolderName}/root_{uniqueFolderName}.md", root);
+            WriteToFile($"{uniqueFolderName}/root_folder_{uniqueFolderName}/a_folder_{uniqueFolderName}/a_{uniqueFolderName}.md", a);
+            WriteToFile($"{uniqueFolderName}/root_folder_{uniqueFolderName}/token_folder_{uniqueFolderName}/token1_{uniqueFolderName}.md", token1);
+            WriteToFile($"{uniqueFolderName}/fallback_folder_{uniqueFolderName}/token_folder_{uniqueFolderName}/token2_{uniqueFolderName}.md", token2);
+
+            var fallbackFolders = new List<string> { { Path.Combine(Directory.GetCurrentDirectory(), $"{uniqueFolderName}/fallback_folder_{uniqueFolderName}") } };
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(Path.Combine(Directory.GetCurrentDirectory(), $"{uniqueFolderName}/root_folder_{uniqueFolderName}"), root, fallbackFolders, $"root_{uniqueFolderName}.md", dependency: dependency);
+            Assert.Equal($@"<p>1markdown root.md main content start.</p>
+<!-- BEGIN INCLUDE: Include content from &quot;a_folder_{uniqueFolderName}/a_{uniqueFolderName}.md&quot; --><p>1markdown a.md main content start.</p>
+<!-- BEGIN INCLUDE: Include content from &quot;token_folder_{uniqueFolderName}/token1_{uniqueFolderName}.md&quot; --><p>1markdown token1.md content start.</p>
+<!-- BEGIN INCLUDE: Include content from &quot;token_folder_{uniqueFolderName}/token2_{uniqueFolderName}.md&quot; --><p><strong>1markdown token2.md main content</strong></p>
+<!--END INCLUDE --><p>markdown token1.md content end.</p>
+<!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;token_folder_{uniqueFolderName}/token2_{uniqueFolderName}.md&quot; --><p><strong>1markdown token2.md main content</strong></p>
+<!--END INCLUDE --><p>markdown a.md main content end.</p>
+<!--END INCLUDE --><p>markdown root.md main content end.</p>
+".Replace("\r\n", "\n"), marked);
+            Assert.Equal(
+                new[] { $"../fallback_folder_{uniqueFolderName}/token_folder_{uniqueFolderName}/token2_{uniqueFolderName}.md", $"a_folder_{uniqueFolderName}/a_{uniqueFolderName}.md", $"token_folder_{uniqueFolderName}/token1_{uniqueFolderName}.md", $"token_folder_{uniqueFolderName}/token2_{uniqueFolderName}.md" },
+                dependency.OrderBy(x => x));
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestFallback_InclusionWithCodeFences()
+        {
+            // -root_folder (this is also docset folder)
+            //  |- root.md
+            //  |- a_folder
+            //     |- a.md
+            //  |- code_folder
+            //     |- sample1.cs
+            // -fallback_folder
+            //  |- a_folder
+            //     |- code_in_a.cs
+            //  |- code_folder
+            //     |- sample2.cs
+
+            // 1. Prepare data
+            var root = @"markdown root.md main content start.
+
+mardown a content in root.md content start
+
+[!include[a](a_folder/a.md ""This is a.md"")]
+
+mardown a content in root.md content end
+
+sample 1 code in root.md content start
+
+[!CODE-cs[this is sample 1 code](code_folder/sample1.cs)]
+
+sample 1 code in root.md content end
+
+sample 2 code in root.md content start
+
+[!CODE-cs[this is sample 2 code](code_folder/sample2.cs)]
+
+sample 2 code in root.md content end
+
+markdown root.md main content end.";
+
+            var a = @"markdown a.md main content start.
+
+code_in_a code in a.md content start
+
+[!CODE-cs[this is code_in_a code](code_in_a.cs)]
+
+code_in_a in a.md content end
+
+markdown a.md a.md content end.";
+
+            var code_in_a = @"namespace code_in_a{}";
+
+            var sample1 = @"namespace sample1{}";
+
+            var sample2 = @"namespace sample2{}";
+
+            var uniqueFolderName = Path.GetRandomFileName();
+            WriteToFile($"{uniqueFolderName}/root_folder/root.md", root);
+            WriteToFile($"{uniqueFolderName}/root_folder/a_folder/a.md", a);
+            WriteToFile($"{uniqueFolderName}/root_folder/code_folder/sample1.cs", sample1);
+            WriteToFile($"{uniqueFolderName}/fallback_folder/a_folder/code_in_a.cs", code_in_a);
+            WriteToFile($"{uniqueFolderName}/fallback_folder/code_folder/sample2.cs", sample2);
+
+            var fallbackFolders = new List<string> { { Path.Combine(Directory.GetCurrentDirectory(), $"{uniqueFolderName}/fallback_folder") } };
+
+            // Verify root.md markup result
+            var rootDependency = new HashSet<string>();
+            var rootMarked = DocfxFlavoredMarked.Markup(Path.Combine(Directory.GetCurrentDirectory(), $"{uniqueFolderName}/root_folder"), root, fallbackFolders, "root.md", dependency: rootDependency);
+            Assert.Equal(@"<p>markdown root.md main content start.</p>
+<p>mardown a content in root.md content start</p>
+<!-- BEGIN INCLUDE: Include content from &quot;a_folder/a.md&quot; --><p>markdown a.md main content start.</p>
+<p>code_in_a code in a.md content start</p>
+<pre><code class=""lang-cs"" name=""this is code_in_a code"">namespace code_in_a{}
+</code></pre><p>code_in_a in a.md content end</p>
+<p>markdown a.md a.md content end.</p>
+<!--END INCLUDE --><p>mardown a content in root.md content end</p>
+<p>sample 1 code in root.md content start</p>
+<pre><code class=""lang-cs"" name=""this is sample 1 code"">namespace sample1{}
+</code></pre><p>sample 1 code in root.md content end</p>
+<p>sample 2 code in root.md content start</p>
+<pre><code class=""lang-cs"" name=""this is sample 2 code"">namespace sample2{}
+</code></pre><p>sample 2 code in root.md content end</p>
+<p>markdown root.md main content end.</p>
+".Replace("\r\n", "\n"), rootMarked);
+            Assert.Equal(
+                new[] { "../fallback_folder/a_folder/code_in_a.cs", "../fallback_folder/code_folder/sample2.cs", "a_folder/a.md", "a_folder/code_in_a.cs", "code_folder/sample1.cs", "code_folder/sample2.cs" },
+                rootDependency.OrderBy(x => x));
+
+            // Verify a.md markup result
+            var aDependency = new HashSet<string>();
+            var aMarked = DocfxFlavoredMarked.Markup(Path.Combine(Directory.GetCurrentDirectory(), $"{uniqueFolderName}/root_folder"), a, fallbackFolders, "a_folder/a.md", dependency: aDependency);
+            Assert.Equal(@"<p>markdown a.md main content start.</p>
+<p>code_in_a code in a.md content start</p>
+<pre><code class=""lang-cs"" name=""this is code_in_a code"">namespace code_in_a{}
+</code></pre><p>code_in_a in a.md content end</p>
+<p>markdown a.md a.md content end.</p>
+".Replace("\r\n", "\n"), aMarked);
+            Assert.Equal(
+                new[] { "../../fallback_folder/a_folder/code_in_a.cs", "code_in_a.cs" },
+                aDependency.OrderBy(x => x));
+        }
+
+        #endregion
     }
 }

@@ -7,9 +7,13 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
     using System.IO;
 
     using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.Plugins;
+    using Microsoft.DocAsCode.Utility;
 
     public static class IncrementalUtility
     {
+        private const int MaxRetry = 3;
+
         public static T LoadIntermediateFile<T>(string fileName)
         {
             if (string.IsNullOrEmpty(fileName))
@@ -55,6 +59,86 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
             using (var writer = new StreamWriter(fileName))
             {
                 JsonUtility.Serialize(writer, content);
+            }
+        }
+
+        public static string GetDependencyKey(FileAndType file)
+        {
+            if (file == null)
+            {
+                return null;
+            }
+            return ((RelativePath)file.File).GetPathFromWorkingFolder().ToString();
+        }
+
+        public static string GetRandomEntry(string baseDir)
+        {
+            string name;
+            do
+            {
+                name = Path.GetRandomFileName();
+            } while (Directory.Exists(Path.Combine(baseDir, name)) || File.Exists(Path.Combine(baseDir, name)));
+            return name;
+        }
+
+        public static string CreateRandomFileName(string baseDir) =>
+            RetryIO(() =>
+            {
+                string fileName = GetRandomEntry(baseDir);
+                using (File.Create(Path.Combine(baseDir, fileName)))
+                {
+                    // create new zero length file.
+                }
+                return fileName;
+            });
+
+        public static FileStream CreateRandomFileStream(string baseDir) =>
+            RetryIO(() => File.Create(Path.Combine(baseDir, GetRandomEntry(baseDir))));
+
+        public static string CreateRandomDirectory(string baseDir) =>
+            RetryIO(() =>
+            {
+                var folderName = GetRandomEntry(baseDir);
+                Directory.CreateDirectory(Path.Combine(baseDir, folderName));
+                return folderName;
+            });
+
+        public static T RetryIO<T>(Func<T> func)
+        {
+            var count = 0;
+            while (true)
+            {
+                try
+                {
+                    return func();
+                }
+                catch (IOException)
+                {
+                    if (count++ >= MaxRetry)
+                    {
+                        throw;
+                    }
+                }
+            }
+        }
+
+        public static void RetryIO(Action action)
+        {
+            var count = 0;
+            while (true)
+            {
+                try
+                {
+                    action();
+                    return;
+                }
+                catch (IOException)
+                {
+                    if (count++ >= MaxRetry)
+                    {
+                        throw;
+                    }
+                }
             }
         }
     }

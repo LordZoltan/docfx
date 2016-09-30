@@ -2,7 +2,8 @@
   "docfx": {
     "releaseFolder": "docfx/artifacts/Release",
     "home": "docfx",
-    "e2eproj": "docfx/test/RunE2ETests/RunE2ETests.csproj",
+    "docfxSeedHome": "docfx-seed",
+    "e2eTestsHome": "docfx/test/docfx.E2E.Tests",
     "docFolder": "docfx/Documentation",
     "repoUrl": "git@github.com-ci:dotnet/docfx.git",
     "siteFolder": "docfx/Documentation/_site",

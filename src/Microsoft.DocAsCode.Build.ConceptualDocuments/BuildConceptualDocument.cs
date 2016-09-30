@@ -6,7 +6,6 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
     using System.Collections.Generic;
     using System.Collections.Immutable;
     using System.Composition;
-    using System.IO;
 
     using HtmlAgilityPack;
 
@@ -80,24 +79,24 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                 model.Properties.XrefSpec = new XRefSpec
                 {
                     Uid = model.Uids[0].Name,
-                    Name = TitleThumbnail(content[Constants.PropertyName.Title] as string?? model.Uids[0].Name, TitleThumbnailMaxLength),
+                    Name = TitleThumbnail(content[Constants.PropertyName.Title] as string ?? model.Uids[0].Name, TitleThumbnailMaxLength),
                     Href = ((RelativePath)model.File).GetPathFromWorkingFolder()
                 };
             }
-            host.ReportDependency(model, result.Dependency);
+
+            foreach (var d in result.Dependency)
+            {
+                host.ReportDependencyTo(model, d, DependencyTypeName.Include);
+            }
         }
 
-        #region ISupportIncrementalBuild Members
+        #region ISupportIncrementalBuildStep Members
 
-        public bool CanIncrementalBuild(FileAndType fileAndType)
-        {
-            return true;
-        }
+        public bool CanIncrementalBuild(FileAndType fileAndType) => true;
 
-        public string GetIncrementalContextHash()
-        {
-            return null;
-        }
+        public string GetIncrementalContextHash() => null;
+
+        public IEnumerable<DependencyType> GetDependencyTypesToRegister() => null;
 
         #endregion
 

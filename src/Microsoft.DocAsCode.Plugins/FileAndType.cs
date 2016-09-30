@@ -6,10 +6,13 @@ namespace Microsoft.DocAsCode.Plugins
     using System;
     using System.IO;
 
+    using Newtonsoft.Json;
+
     public sealed class FileAndType
         : IEquatable<FileAndType>
     {
-        public FileAndType(string baseDir, string file, DocumentType type, string sourceDir = null, string destinationDir = null, string pathRewriteBaseDir = null)
+        [JsonConstructor]
+        public FileAndType(string baseDir, string file, DocumentType type, string sourceDir = null, string destinationDir = null)
         {
             if (baseDir == null)
             {
@@ -31,6 +34,14 @@ namespace Microsoft.DocAsCode.Plugins
             {
                 throw new ArgumentException("File cannot be rooted.", nameof(file));
             }
+            if (!string.IsNullOrEmpty(sourceDir) && Path.IsPathRooted(sourceDir))
+            {
+                throw new ArgumentException("File cannot be rooted.", nameof(sourceDir));
+            }
+            if (!string.IsNullOrEmpty(destinationDir) && Path.IsPathRooted(destinationDir))
+            {
+                throw new ArgumentException("File cannot be rooted.", nameof(destinationDir));
+            }
 
             BaseDir = baseDir.Replace('\\', '/');
             File = file.Replace('\\', '/');
@@ -38,39 +49,65 @@ namespace Microsoft.DocAsCode.Plugins
             FullPath = Path.Combine(BaseDir, File).Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
             SourceDir = sourceDir?.Replace('\\', '/') ?? string.Empty;
             DestinationDir = destinationDir?.Replace('\\', '/') ?? string.Empty;
-            PathReWriteBaseDir = pathRewriteBaseDir?.Replace('\\', '/') ?? string.Empty;
             StringComparer = GetStringComparer();
         }
 
+        [Obsolete]
+        public FileAndType(string baseDir, string file, DocumentType type, Func<string, string> pathRewriter)
+            : this(baseDir, file, type, null, null)
+        {
+            PathRewriter = pathRewriter;
+        }
+
+        [JsonIgnore]
         public StringComparer StringComparer { get; }
 
+        [JsonProperty("baseDir")]
         public string BaseDir { get; }
 
+        [JsonProperty("file")]
         public string File { get; }
 
+        [JsonIgnore]
         public string FullPath { get; }
 
+        [JsonProperty("type")]
         public DocumentType Type { get; }
 
+        [JsonProperty("sourceDir")]
         public string SourceDir { get; set; }
 
+        [JsonProperty("destinationDir")]
         public string DestinationDir { get; set; }
 
-        public string PathReWriteBaseDir { get; set; }
+        [Obsolete]
+        public Func<string, string> PathRewriter { get; }
 
         public FileAndType ChangeBaseDir(string baseDir)
         {
-            return new FileAndType(baseDir, File, Type, SourceDir, DestinationDir, PathReWriteBaseDir);
+            if (PathRewriter != null)
+            {
+                return new FileAndType(baseDir, File, Type, PathRewriter);
+            }
+            return new FileAndType(baseDir, File, Type, SourceDir, DestinationDir);
         }
 
         public FileAndType ChangeFile(string file)
         {
-            return new FileAndType(BaseDir, file, Type, SourceDir, DestinationDir, PathReWriteBaseDir);
+            if (PathRewriter != null)
+            {
+                return new FileAndType(BaseDir, file, Type, PathRewriter);
+            }
+            return new FileAndType(BaseDir, file, Type, SourceDir, DestinationDir);
         }
 
         public FileAndType ChangeType(DocumentType type)
         {
-            return new FileAndType(BaseDir, File, type, SourceDir, DestinationDir, PathReWriteBaseDir);
+            if (PathRewriter != null)
+            {
+                return new FileAndType(BaseDir, File, type, PathRewriter);
+            }
+            return new FileAndType(BaseDir, File, type, SourceDir, DestinationDir);
         }
 
         public bool Equals(FileAndType other)
