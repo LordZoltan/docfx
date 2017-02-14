@@ -7,6 +7,7 @@ namespace Microsoft.DocAsCode.SubCommands
     using System.Collections.Generic;
     using System.Collections.Immutable;
     using System.IO;
+    using System.Linq;
     using System.Runtime.Remoting.Lifetime;
     using System.Reflection;
 
@@ -22,7 +23,6 @@ namespace Microsoft.DocAsCode.SubCommands
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     [Serializable]
     internal sealed class DocumentBuilderWrapper
@@ -63,7 +63,7 @@ namespace Microsoft.DocAsCode.SubCommands
         public void BuildDocument()
         {
             var sponsor = new ClientSponsor();
-            EnvironmentContext.BaseDirectory = _baseDirectory;
+            EnvironmentContext.SetBaseDirectory(_baseDirectory);
             if (_listener != null)
             {
                 Logger.LogLevelThreshold = _logLevel;
@@ -102,10 +102,11 @@ namespace Microsoft.DocAsCode.SubCommands
         public static void BuildDocument(BuildJsonConfig config, TemplateManager templateManager, string baseDirectory, string outputDirectory, string pluginDirectory, string templateDirectory)
         {
             IEnumerable<Assembly> assemblies;
-            using (new LoggerPhaseScope("LoadPluginAssemblies", true))
+            using (new LoggerPhaseScope("LoadPluginAssemblies", LogLevel.Verbose))
             {
                 assemblies = LoadPluginAssemblies(pluginDirectory);
             }
+
             var postProcessorNames = config.PostProcessors.ToImmutableArray();
             var metadata = config.GlobalMetadata?.ToImmutableDictionary();
 
@@ -120,10 +121,16 @@ namespace Microsoft.DocAsCode.SubCommands
                 }
             }
 
-            using (var builder = new DocumentBuilder(assemblies, postProcessorNames, templateManager?.GetTemplatesHash(), config.IntermediateFolder))
+            ChangeList changeList = null;
+            if (config.ChangesFile != null)
+            {
+                changeList = ChangeList.Parse(config.ChangesFile, config.BaseDirectory);
+            }
+
+            using (var builder = new DocumentBuilder(assemblies, postProcessorNames, templateManager?.GetTemplatesHash(), config.IntermediateFolder, changeList?.From, changeList?.To))
             using (new PerformanceScope("building documents", LogLevel.Info))
             {
-                builder.Build(ConfigToParameter(config, templateManager, baseDirectory, outputDirectory, templateDirectory), outputDirectory);
+                builder.Build(ConfigToParameter(config, templateManager, changeList, baseDirectory, outputDirectory, templateDirectory).ToList(), outputDirectory);
             }
         }
 
@@ -154,7 +161,13 @@ namespace Microsoft.DocAsCode.SubCommands
                     if (assemblyName == "Microsoft.DocAsCode.EntityModel")
                     {
                         // work around, don't load assembly Microsoft.DocAsCode.EntityModel.
-                        Logger.LogWarning("Skipping assembly: Microsoft.DocAsCode.EntityModel.");
+                        Logger.LogVerbose("Skipping assembly: Microsoft.DocAsCode.EntityModel.");
+                        continue;
+                    }
+                    if (assemblyName == typeof(ValidateBookmark).Assembly.GetName().Name)
+                    {
+                        // work around, don't load assembly that has ValidateBookmark.
+                        Logger.LogVerbose($"Skipping assembly: {assemblyName}.");
                         continue;
                     }
                     try
@@ -175,10 +188,14 @@ namespace Microsoft.DocAsCode.SubCommands
             }
         }
 
-        private static IEnumerable<DocumentBuildParameters> ConfigToParameter(BuildJsonConfig config, TemplateManager templateManager, string baseDirectory, string outputDirectory, string templateDir)
+        private static IEnumerable<DocumentBuildParameters> ConfigToParameter(BuildJsonConfig config, TemplateManager templateManager, ChangeList changeList, string baseDirectory, string outputDirectory, string templateDir)
         {
-            var parameters = new DocumentBuildParameters();
-            parameters.OutputBaseDir = outputDirectory;
+            var parameters = new DocumentBuildParameters
+            {
+                OutputBaseDir = outputDirectory,
+                ForceRebuild = config.Force ?? false,
+                ForcePostProcess = config.ForcePostProcess ?? false
+            };
             if (config.GlobalMetadata != null)
             {
                 parameters.Metadata = config.GlobalMetadata.ToImmutableDictionary();
@@ -240,27 +257,27 @@ namespace Microsoft.DocAsCode.SubCommands
             {
                 parameters.MarkdownEngineParameters = config.MarkdownEngineProperties.ToImmutableDictionary();
             }
+            if (config.CustomLinkResolver != null)
+            {
+                parameters.CustomLinkResolver = config.CustomLinkResolver;
+            }
 
             parameters.TemplateDir = templateDir;
-
-            ChangeList changeList = null;
-            if (config.ChangesFile != null)
-            {
-                changeList = ChangeList.Parse(config.ChangesFile, config.BaseDirectory);
-            }
 
             var fileMappingParametersDictionary = GroupFileMappings(config.Content, config.Overwrite, config.Resource);
 
             foreach (var pair in fileMappingParametersDictionary)
             {
-                parameters.Files = GetFileCollectionFromFileMapping(
+                var p = parameters.Clone();
+                p.Files = GetFileCollectionFromFileMapping(
                     baseDirectory,
                     GlobUtility.ExpandFileMapping(baseDirectory, pair.Value.GetFileMapping(FileMappingType.Content)),
                     GlobUtility.ExpandFileMapping(baseDirectory, pair.Value.GetFileMapping(FileMappingType.Overwrite)),
                     GlobUtility.ExpandFileMapping(baseDirectory, pair.Value.GetFileMapping(FileMappingType.Resource)));
-                parameters.VersionName = pair.Key;
-                parameters.Changes = GetIntersectChanges(parameters.Files, changeList);
-                yield return parameters;
+                p.VersionName = pair.Key;
+                p.Changes = GetIntersectChanges(p.Files, changeList);
+                p.RootTocPath = pair.Value.RootTocPath;
+                yield return p;
             }
         }
 
@@ -380,7 +397,7 @@ namespace Microsoft.DocAsCode.SubCommands
                 return null;
             }
 
-            var dict = new Dictionary<string, ChangeKindWithDependency>();
+            var dict = new OSPlatformSensitiveDictionary<ChangeKindWithDependency>();
             foreach (var file in files.EnumerateFiles())
             {
                 string fileKey = ((RelativePath)file.File).GetPathFromWorkingFolder().ToString();
@@ -390,12 +407,11 @@ namespace Microsoft.DocAsCode.SubCommands
             foreach (ChangeItem change in changeList)
             {
                 string fileKey = ((RelativePath)change.FilePath).GetPathFromWorkingFolder().ToString();
-                if (dict.ContainsKey(fileKey))
-                {
-                    dict[fileKey] = change.Kind;
-                }
+
+                // always put the change into dict because docfx could access files outside its own scope, like tokens.
+                dict[fileKey] = change.Kind;
             }
-            return dict.ToImmutableDictionary();
+            return dict.ToImmutableDictionary(FilePathComparer.OSPlatformSensitiveStringComparer);
         }
 
         private class FileMappingParameters : Dictionary<FileMappingType, FileMapping>
@@ -405,6 +421,15 @@ namespace Microsoft.DocAsCode.SubCommands
                 FileMapping result;
                 this.TryGetValue(type, out result);
                 return result;
+            }
+
+            public string RootTocPath
+            {
+                get
+                {
+                    var mapping = GetFileMapping(FileMappingType.Content);
+                    return mapping?.RootTocPath;
+                }
             }
         }
 

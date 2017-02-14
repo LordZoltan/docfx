@@ -13,7 +13,8 @@ namespace Microsoft.DocAsCode.MarkdownLite
 
         public virtual IMarkdownToken TryMatch(IMarkdownParser parser, IMarkdownParsingContext context)
         {
-            if (!(bool)parser.Context.Variables[MarkdownBlockContext.IsTop])
+            if (!parser.Context.Variables.ContainsKey(MarkdownBlockContext.IsTop) ||
+                false.Equals(parser.Context.Variables[MarkdownBlockContext.IsTop]))
             {
                 return null;
             }

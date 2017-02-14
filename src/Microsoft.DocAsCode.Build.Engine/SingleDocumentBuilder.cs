@@ -7,7 +7,6 @@ namespace Microsoft.DocAsCode.Build.Engine
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
-    using System.Composition.Hosting;
     using System.Collections.Immutable;
     using System.Text;
 
@@ -15,27 +14,42 @@ namespace Microsoft.DocAsCode.Build.Engine
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
-
-    using Newtonsoft.Json;
 
     public class SingleDocumentBuilder : IDisposable
     {
         private const string PhaseName = "Build Document";
         private const string XRefMapFileName = "xrefmap.yml";
 
-        public CompositionHost Container { get; set; }
         public IEnumerable<IDocumentProcessor> Processors { get; set; }
         public IEnumerable<IInputMetadataValidator> MetadataValidators { get; set; }
+        public IMarkdownServiceProvider MarkdownServiceProvider { get; set; }
 
         internal BuildInfo CurrentBuildInfo { get; set; }
         internal BuildInfo LastBuildInfo { get; set; }
         internal string IntermediateFolder { get; set; }
+        private IMarkdownService MarkdownService { get; set; }
 
-        private bool ShouldTraceIncrementalInfo => IntermediateFolder != null;
-        private BuildVersionInfo _cbv;
-        private BuildVersionInfo _lbv;
-        private bool _canIncremental;
+        public static ImmutableList<FileModel> Build(IDocumentProcessor processor, DocumentBuildParameters parameters, IMarkdownService markdownService)
+        {
+            var hostServiceCreator = new HostServiceCreator(null);
+            var hostService = hostServiceCreator.CreateHostService(
+                parameters,
+                null,
+                markdownService,
+                null,
+                processor,
+                parameters.Files.EnumerateFiles());
+            var phaseProcessor = new PhaseProcessor
+            {
+                Handlers =
+                    {
+                        new CompilePhaseHandler(null),
+                        new LinkPhaseHandler(null, null),
+                    }
+            };
+            phaseProcessor.Process(new List<HostService> { hostService }, parameters.MaxParallelism);
+            return hostService.Models;
+        }
 
         public Manifest Build(DocumentBuildParameters parameters)
         {
@@ -65,118 +79,63 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         private Manifest BuildCore(DocumentBuildParameters parameters)
         {
-            using (new LoggerPhaseScope(PhaseName, true))
+            using (new LoggerPhaseScope(PhaseName, LogLevel.Verbose))
             {
-                _canIncremental = false;
-                _cbv = null;
-                _lbv = null;
                 Logger.LogInfo($"Max parallelism is {parameters.MaxParallelism}.");
                 Directory.CreateDirectory(parameters.OutputBaseDir);
+
                 var context = new DocumentBuildContext(
                     Path.Combine(Directory.GetCurrentDirectory(), parameters.OutputBaseDir),
                     parameters.Files.EnumerateFiles(),
                     parameters.ExternalReferencePackages,
                     parameters.XRefMaps,
                     parameters.MaxParallelism,
-                    parameters.Files.DefaultBaseDir);
-                if (ShouldTraceIncrementalInfo)
-                {
-                    string configHash = ComputeConfigHash(parameters);
-                    var fileAttributes = ComputeFileAttributes(parameters);
-                    var baseDir = Path.Combine(IntermediateFolder, CurrentBuildInfo.DirectoryName);
-                    _cbv = new BuildVersionInfo
-                    {
-                        VersionName = parameters.VersionName,
-                        ConfigHash = configHash,
-                        AttributesFile = IncrementalUtility.CreateRandomFileName(baseDir),
-                        DependencyFile = IncrementalUtility.CreateRandomFileName(baseDir),
-                        ManifestFile = IncrementalUtility.CreateRandomFileName(baseDir),
-                        XRefSpecMapFile = IncrementalUtility.CreateRandomFileName(baseDir),
-                        BuildMessageFile = IncrementalUtility.CreateRandomFileName(baseDir),
-                        Attributes = fileAttributes,
-                        Dependency = context.DependencyGraph,
-                    };
-                    CurrentBuildInfo.Versions.Add(_cbv);
-                    Logger.RegisterListener(_cbv.BuildMessage.GetListener());
-                    _canIncremental = GetCanIncremental(configHash, parameters.VersionName);
-                    if (_canIncremental)
-                    {
-                        LoadChanges(parameters, context, fileAttributes);
-                        Logger.LogDiagnostic($"Before expanding dependency before build, changes: {JsonUtility.Serialize(context.ChangeDict)}");
-                        var dependencyGraph = _lbv.Dependency;
-                        ExpandDependency(dependencyGraph, context, d => dependencyGraph.DependencyTypes[d.Type].TriggerBuild);
-                        Logger.LogDiagnostic($"After expanding dependency before build, changes: {JsonUtility.Serialize(context.ChangeDict)}");
-                    }
-                }
+                    parameters.Files.DefaultBaseDir,
+                    parameters.VersionName,
+                    parameters.ApplyTemplateSettings,
+                    parameters.RootTocPath);
 
                 Logger.LogVerbose("Start building document...");
 
                 // Start building document...
                 List<HostService> hostServices = null;
+                IHostServiceCreator hostServiceCreator = null;
+                PhaseProcessor phaseProcessor = null;
                 try
                 {
-                    using (var processor = parameters.TemplateManager?.GetTemplateProcessor(context, parameters.MaxParallelism) ?? TemplateProcessor.DefaultProcessor)
+                    using (var templateProcessor = parameters.TemplateManager?.GetTemplateProcessor(context, parameters.MaxParallelism) ?? TemplateProcessor.DefaultProcessor)
                     {
-                        IMarkdownService markdownService;
-                        using (new LoggerPhaseScope("CreateMarkdownService", true))
+                        using (new LoggerPhaseScope("Prepare", LogLevel.Verbose))
                         {
-                            markdownService = CreateMarkdownService(parameters, processor.Tokens.ToImmutableDictionary());
+                            if (MarkdownService == null)
+                            {
+                                using (new LoggerPhaseScope("CreateMarkdownService", LogLevel.Verbose))
+                                {
+                                    MarkdownService = CreateMarkdownService(parameters, templateProcessor.Tokens.ToImmutableDictionary());
+                                }
+                            }
+                            Prepare(
+                                parameters,
+                                context,
+                                templateProcessor,
+                                (MarkdownService as IHasIncrementalContext)?.GetIncrementalContextHash(),
+                                out hostServiceCreator,
+                                out phaseProcessor);
+                        }
+                        using (new LoggerPhaseScope("Load", LogLevel.Verbose))
+                        {
+                            hostServices = GetInnerContexts(parameters, Processors, templateProcessor, hostServiceCreator).ToList();
                         }
 
-                        using (new LoggerPhaseScope("Load", true))
-                        {
-                            hostServices = GetInnerContexts(parameters, Processors, processor, markdownService, context).ToList();
-                        }
+                        BuildCore(phaseProcessor, hostServices, context);
 
-                        var manifest = BuildCore(hostServices, context, parameters.VersionName).ToList();
-
-                        // Use manifest from now on
-                        using (new LoggerPhaseScope("UpdateContext", true))
-                        {
-                            UpdateContext(context);
-                        }
-
-                        // Run getOptions from Template
-                        using (new LoggerPhaseScope("FeedOptions", true))
-                        {
-                            FeedOptions(manifest, context);
-                        }
-
-                        // Template can feed back xref map, actually, the anchor # location can only be determined in template
-                        using (new LoggerPhaseScope("FeedXRefMap", true))
-                        {
-                            FeedXRefMap(manifest, context);
-                        }
-
-                        using (new LoggerPhaseScope("UpdateHref", true))
-                        {
-                            UpdateHref(manifest, context);
-                        }
-
-                        // Afterwards, m.Item.Model.Content is always IDictionary
-                        using (new LoggerPhaseScope("ApplySystemMetadata", true))
-                        {
-                            ApplySystemMetadata(manifest, context);
-                        }
-
-                        // Register global variables after href are all updated
-                        IDictionary<string, object> globalVariables;
-                        using (new LoggerPhaseScope("FeedGlobalVariables", true))
-                        {
-                            globalVariables = FeedGlobalVariables(processor.Tokens, manifest, context);
-                        }
-
-                        // processor to add global variable to the model
-                        foreach (var m in processor.Process(manifest.Select(s => s.Item).ToList(), context, parameters.ApplyTemplateSettings, globalVariables))
-                        {
-                            context.ManifestItems.Add(m);
-                        }
                         return new Manifest
                         {
                             Files = context.ManifestItems.ToList(),
                             Homepages = GetHomepages(context),
                             XRefMap = ExportXRefMap(parameters, context),
-                            SourceBasePath = EnvironmentContext.BaseDirectory?.ToNormalizedPath()
+                            SourceBasePath = StringExtension.ToNormalizedPath(EnvironmentContext.BaseDirectory),
+                            IncrementalInfo = context.IncrementalBuildContext != null ? new List<IncrementalInfo> { context.IncrementalBuildContext.IncrementalInfo } : null,
                         };
                     }
                 }
@@ -194,193 +153,18 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
         }
 
-        private static string CreateRandomDir(string baseDir)
+        private void BuildCore(PhaseProcessor phaseProcessor, List<HostService> hostServices, DocumentBuildContext context)
         {
-            string folderName;
-            do
+            try
             {
-                folderName = Path.GetRandomFileName();
-            } while (Directory.Exists(Path.Combine(baseDir, folderName)));
-            Directory.CreateDirectory(Path.Combine(baseDir, folderName));
-            return folderName;
-        }
-
-        private bool GetCanIncremental(string configHash, string versionName)
-        {
-            if (LastBuildInfo == null)
-            {
-                return false;
+                phaseProcessor.Process(hostServices, context.MaxParallelism);
             }
-            _lbv = LastBuildInfo.Versions.SingleOrDefault(v => v.VersionName == versionName);
-            if (_lbv == null)
+            catch (BuildCacheException e)
             {
-                Logger.LogVerbose($"Cannot build incrementally because last build didn't contain version {versionName}.");
-                return false;
+                var message = $"Build cache was corrupted, please try force rebuild `build --force` or clear the cache files in the path: {IntermediateFolder}. Detail error: {e.Message}.";
+                Logger.LogError(message);
+                throw new DocfxException(message, e);
             }
-            if (configHash != _lbv.ConfigHash)
-            {
-                Logger.LogVerbose("Cannot build incrementally because config changed.");
-                return false;
-            }
-            if (CurrentBuildInfo.DocfxVersion != LastBuildInfo.DocfxVersion)
-            {
-                Logger.LogVerbose($"Cannot build incrementally because docfx version changed from {LastBuildInfo.DocfxVersion} to {CurrentBuildInfo.DocfxVersion}.");
-                return false;
-            }
-            if (CurrentBuildInfo.PluginHash != LastBuildInfo.PluginHash)
-            {
-                Logger.LogVerbose("Cannot build incrementally because plugin changed.");
-                return false;
-            }
-            if (CurrentBuildInfo.TemplateHash != LastBuildInfo.TemplateHash)
-            {
-                Logger.LogVerbose("Cannot build incrementally because template changed.");
-                return false;
-            }
-            return true;
-        }
-
-        private static List<string> ExpandDependency(DependencyGraph dependencyGraph, DocumentBuildContext context, Func<DependencyItem, bool> triggerBuild)
-        {
-            var changeItems = context.ChangeDict;
-            var newChanges = new List<string>();
-
-            if (dependencyGraph != null)
-            {
-                foreach (var from in dependencyGraph.FromNodes)
-                {
-                    if (dependencyGraph.GetAllDependencyFrom(from).Any(d => triggerBuild(d) && changeItems.ContainsKey(d.To) && changeItems[d.To] != ChangeKindWithDependency.None))
-                    {
-                        if (!changeItems.ContainsKey(from))
-                        {
-                            changeItems[from] = ChangeKindWithDependency.DependencyUpdated;
-                            newChanges.Add(from);
-                        }
-                        else
-                        {
-                            if (changeItems[from] == ChangeKindWithDependency.None)
-                            {
-                                newChanges.Add(from);
-                            }
-                            changeItems[from] |= ChangeKindWithDependency.DependencyUpdated;
-                        }
-                    }
-                }
-            }
-            return newChanges;
-        }
-
-        private Dictionary<string, FileAttributeItem> ComputeFileAttributes(DocumentBuildParameters parameters)
-        {
-            return (from f in parameters.Files.EnumerateFiles()
-                    let fileKey = ((RelativePath)f.File).GetPathFromWorkingFolder().ToString()
-                    group f by fileKey into g
-                    select new FileAttributeItem
-                    {
-                        File = g.Key,
-                        LastModifiedTime = File.GetLastWriteTimeUtc(g.First().FullPath),
-                        MD5 = File.ReadAllText(g.First().FullPath).GetMd5String(),
-                    }).ToDictionary(a => a.File);
-        }
-
-        private void LoadChanges(DocumentBuildParameters parameter, DocumentBuildContext context, IReadOnlyDictionary<string, FileAttributeItem> fileAttributes)
-        {
-            var changeItems = context.ChangeDict;
-            if (parameter.Changes != null)
-            {
-                // use user-provided changelist
-                foreach (var pair in parameter.Changes)
-                {
-                    changeItems[pair.Key] = pair.Value;
-                }
-            }
-            else
-            {
-                // get changelist from lastBuildInfo if user doesn't provide changelist
-                var lastFileAttributes = _lbv.Attributes;
-                DateTime checkTime = LastBuildInfo.BuildStartTime;
-                foreach (var file in fileAttributes.Keys.Intersect(lastFileAttributes.Keys))
-                {
-                    var last = lastFileAttributes[file];
-                    var current = fileAttributes[file];
-                    if (current.LastModifiedTime > checkTime || current.MD5 != last.MD5)
-                    {
-                        changeItems[file] = ChangeKindWithDependency.Updated;
-                    }
-                    else
-                    {
-                        changeItems[file] = ChangeKindWithDependency.None;
-                    }
-                }
-
-                foreach (var file in lastFileAttributes.Keys.Except(fileAttributes.Keys))
-                {
-                    changeItems[file] = ChangeKindWithDependency.Deleted;
-                }
-                foreach (var file in fileAttributes.Keys.Except(lastFileAttributes.Keys))
-                {
-                    changeItems[file] = ChangeKindWithDependency.Created;
-                }
-            }
-        }
-
-        private static void UpdateUidDependency(IEnumerable<HostService> hostServices, DocumentBuildContext context)
-        {
-            foreach (var hostService in hostServices)
-            {
-                foreach (var m in hostService.Models)
-                {
-                    if (m.Type == DocumentType.Overwrite)
-                    {
-                        continue;
-                    }
-                    if (m.LinkToUids.Count != 0)
-                    {
-                        string fromNode = ((RelativePath)m.OriginalFileAndType.File).GetPathFromWorkingFolder().ToString();
-                        var dps = from f in GetFilesFromUids(context, m.LinkToUids)
-                                  select new DependencyItem(fromNode, f, fromNode, DependencyTypeName.Uid);
-                        context.DependencyGraph.ReportDependency(dps);
-                    }
-                }
-            }
-        }
-
-        private static IEnumerable<string> GetFilesFromUids(DocumentBuildContext context, IEnumerable<string> uids)
-        {
-            foreach (var uid in uids)
-            {
-                if (string.IsNullOrEmpty(uid))
-                {
-                    continue;
-                }
-                XRefSpec spec;
-                if (!context.XRefSpecMap.TryGetValue(uid, out spec))
-                {
-                    continue;
-                }
-                if (spec.Href != null)
-                {
-                    yield return spec.Href;
-                }
-            }
-        }
-
-        public static ImmutableList<FileModel> Build(IDocumentProcessor processor, DocumentBuildParameters parameters, IMarkdownService markdownService)
-        {
-            var hostService = new HostService(
-                 parameters.Files.DefaultBaseDir,
-                 from file in parameters.Files.EnumerateFiles()
-                 select Load(processor, parameters.Metadata, parameters.FileMetadata, file, false, null, null, null, null)
-                 into model
-                 where model != null
-                 select model)
-            {
-                Processor = processor,
-                MarkdownService = markdownService,
-                DependencyGraph = new DependencyGraph(),
-            };
-            BuildCore(new List<HostService> { hostService }, parameters.MaxParallelism, null, null);
-            return hostService.Models;
         }
 
         private void Cleanup(HostService hostService)
@@ -388,627 +172,23 @@ namespace Microsoft.DocAsCode.Build.Engine
             hostService.Models.RunAll(m => m.Dispose());
         }
 
-        private IEnumerable<ManifestItemWithContext> BuildCore(List<HostService> hostServices, DocumentBuildContext context, string versionName)
-        {
-            //preparation
-            foreach (var hostService in hostServices)
-            {
-                hostService.SourceFiles = context.AllSourceFiles;
-                hostService.DependencyGraph = context.DependencyGraph;
-                foreach (var m in hostService.Models)
-                {
-                    if (m.LocalPathFromRepoRoot == null)
-                    {
-                        m.LocalPathFromRepoRoot = Path.Combine(m.BaseDir, m.File).ToDisplayPath();
-                    }
-                    if (m.LocalPathFromRoot == null)
-                    {
-                        m.LocalPathFromRoot = Path.Combine(m.BaseDir, m.File).ToDisplayPath();
-                    }
-                }
-                using (new LoggerPhaseScope(hostService.Processor.Name, true))
-                {
-                    RegisterDependencyType(hostService, context);
-                }
-            }
-
-            Action<HostService> buildSaver = null;
-            Action<List<HostService>> loader = null;
-            if (ShouldTraceIncrementalInfo)
-            {
-                buildSaver = h => h.SaveIntermediateModel();
-                loader = hs =>
-                {
-                    UpdateHostServices(hostServices);
-                    if (_lbv != null)
-                    {
-                        foreach (var h in hs)
-                        {
-                            foreach (var file in from pair in h.ModelLoadInfo
-                                                 where pair.Value > LoadPhase.None
-                                                 select pair.Key)
-                            {
-                                _lbv.BuildMessage.Replay(file.File);
-                            }
-                        }
-                    }
-                    Logger.UnregisterListener(_cbv.BuildMessage.GetListener());
-                };
-            }
-
-            BuildCore(hostServices, context.MaxParallelism, buildSaver, loader);
-
-            // export manifest
-            return from h in hostServices
-                   from m in ExportManifest(h, context)
-                   select m;
-        }
-
-        private static void BuildCore(List<HostService> hostServices, int maxParallelism, Action<HostService> buildSaver, Action<List<HostService>> loader)
-        {
-            // prebuild and build
-            foreach (var hostService in hostServices)
-            {
-                using (new LoggerPhaseScope(hostService.Processor.Name, true))
-                {
-                    var steps = string.Join("=>", hostService.Processor.BuildSteps.OrderBy(step => step.BuildOrder).Select(s => s.Name));
-                    Logger.LogInfo($"Building {hostService.Models.Count} file(s) in {hostService.Processor.Name}({steps})...");
-                    Logger.LogVerbose($"Processor {hostService.Processor.Name}: Prebuilding...");
-                    using (new LoggerPhaseScope("Prebuild", true))
-                    {
-                        Prebuild(hostService);
-                    }
-                    Logger.LogVerbose($"Processor {hostService.Processor.Name}: Building...");
-                    using (new LoggerPhaseScope("Build", true))
-                    {
-                        BuildArticle(hostService, maxParallelism);
-                    }
-
-                    // save models
-                    hostService.SaveIntermediateModel();
-                }
-            }
-
-            // load all unloaded models(to-do: load models according to changes)
-            loader?.Invoke(hostServices);
-
-            // postbuild
-            foreach (var hostService in hostServices)
-            {
-                using (new LoggerPhaseScope(hostService.Processor.Name, true))
-                {
-                    Logger.LogVerbose($"Processor {hostService.Processor.Name}: Postbuilding...");
-                    using (new LoggerPhaseScope("Postbuild", true))
-                    {
-                        Postbuild(hostService);
-                    }
-                }
-            }
-        }
-
-        private static void UpdateHostServices(IEnumerable<HostService> hostServices, DocumentBuildContext context, string intermediateFolder, ModelManifest lmm, bool canIncremental)
-        {
-            UpdateUidDependency(hostServices, context);
-            if (canIncremental && intermediateFolder != null && lmm != null)
-            {
-                var newChanges = ExpandDependency(context.DependencyGraph, context, d => true);
-                Logger.LogDiagnostic($"After expanding dependency before postbuild, changes: {JsonUtility.Serialize(context.ChangeDict)}");
-                foreach (var hostService in hostServices)
-                {
-                    hostService.ReloadModelsPerIncrementalChanges(newChanges, intermediateFolder, lmm, LoadPhase.PostBuild);
-                }
-            }
-        }
-
-        private static void UpdateHostServices(IEnumerable<HostService> hostServices)
-        {
-            foreach (var hostService in hostServices)
-            {
-                if (hostService.CanIncrementalBuild)
-                {
-                    hostService.ReloadUnloadedModels(LoadPhase.PostBuild);
-                }
-            }
-        }
-
-        private void FeedXRefMap(List<ManifestItemWithContext> manifest, IDocumentBuildContext context)
-        {
-            Logger.LogVerbose("Feeding xref map...");
-            manifest.RunAll(m =>
-            {
-                if (m.TemplateBundle == null)
-                {
-                    return;
-                }
-
-                using (new LoggerFileScope(m.FileModel.LocalPathFromRepoRoot))
-                {
-                    Logger.LogDiagnostic($"Feed xref map from template for {m.Item.DocumentType}...");
-                    var bookmarks = m.Options.Bookmarks;
-                    // TODO: Add bookmarks to xref
-                }
-            });
-        }
-
-        private void FeedOptions(List<ManifestItemWithContext> manifest, IDocumentBuildContext context)
-        {
-            Logger.LogVerbose("Feeding options from template...");
-            manifest.RunAll(m =>
-            {
-                if (m.TemplateBundle == null)
-                {
-                    return;
-                }
-
-                using (new LoggerFileScope(m.FileModel.LocalPathFromRepoRoot))
-                {
-                    Logger.LogDiagnostic($"Feed options from template for {m.Item.DocumentType}...");
-                    m.Options = m.TemplateBundle.GetOptions(m.Item, context);
-                }
-            });
-        }
-
-        private void ApplySystemMetadata(List<ManifestItemWithContext> manifest, IDocumentBuildContext context)
-        {
-            Logger.LogVerbose("Applying system metadata to manifest...");
-
-            // Add system attributes
-            var systemMetadataGenerator = new SystemMetadataGenerator(context);
-
-            manifest.RunAll(m =>
-            {
-                using (new LoggerFileScope(m.FileModel.LocalPathFromRepoRoot))
-                {
-                    Logger.LogDiagnostic("Generating system metadata...");
-
-                    // TODO: use weak type for system attributes from the beginning
-                    var systemAttrs = systemMetadataGenerator.Generate(m.Item);
-                    var metadata = (IDictionary<string, object>)ConvertToObjectHelper.ConvertStrongTypeToObject(systemAttrs);
-                    // Change file model to weak type
-                    var model = m.Item.Model.Content;
-                    var modelAsObject = ConvertToObjectHelper.ConvertStrongTypeToObject(model) as IDictionary<string, object>;
-                    if (modelAsObject != null)
-                    {
-                        foreach (var token in modelAsObject)
-                        {
-                            // Overwrites the existing system metadata if the same key is defined in document model
-                            metadata[token.Key] = token.Value;
-                        }
-                    }
-                    else
-                    {
-                        Logger.LogWarning("Input model is not an Object model, it will be wrapped into an Object model. Please use --exportRawModel to view the wrapped model");
-                        metadata["model"] = model;
-                    }
-
-                    // Append system metadata to model
-                    m.Item.Model.Content = metadata;
-                }
-            });
-        }
-
-        private IDictionary<string, object> FeedGlobalVariables(IDictionary<string, string> initialGlobalVariables, List<ManifestItemWithContext> manifest, IDocumentBuildContext context)
-        {
-            Logger.LogVerbose("Feeding global variables from template...");
-
-            // E.g. we can set TOC model to be globally shared by every data model
-            // Make sure it is single thread
-            IDictionary<string, object> metadata = initialGlobalVariables == null ?
-                new Dictionary<string, object>() :
-                initialGlobalVariables.ToDictionary(pair => pair.Key, pair => (object)pair.Value);
-            var sharedObjects = new Dictionary<string, object>();
-            manifest.RunAll(m =>
-            {
-                if (m.TemplateBundle == null)
-                {
-                    return;
-                }
-
-                using (new LoggerFileScope(m.FileModel.LocalPathFromRepoRoot))
-                {
-                    Logger.LogDiagnostic($"Load shared model from template for {m.Item.DocumentType}...");
-                    if (m.Options.IsShared)
-                    {
-                        sharedObjects[m.Item.Key] = m.Item.Model.Content;
-                    }
-                }
-            });
-
-            metadata["_shared"] = sharedObjects;
-            return metadata;
-        }
-
-        private void UpdateHref(List<ManifestItemWithContext> manifest, IDocumentBuildContext context)
-        {
-            Logger.LogVerbose("Updating href...");
-            manifest.RunAll(m =>
-            {
-                using (new LoggerFileScope(m.FileModel.LocalPathFromRepoRoot))
-                {
-                    Logger.LogDiagnostic($"Plug-in {m.Processor.Name}: Updating href...");
-                    m.Processor.UpdateHref(m.FileModel, context);
-
-                    // reset model after updating href
-                    m.Item.Model = m.FileModel.ModelWithCache;
-                }
-            });
-        }
-
-        private static FileModel Load(
-            IDocumentProcessor processor,
-            ImmutableDictionary<string, object> metadata,
-            FileMetadata fileMetadata,
-            FileAndType file,
-            bool canProcessorIncremental,
-            IDictionary<string, XRefSpec> xrefSpecMap,
-            IEnumerable<ManifestItem> manifestItems,
-            DependencyGraph dg,
-            DocumentBuildContext context)
-        {
-            using (new LoggerFileScope(file.File))
-            {
-                Logger.LogDiagnostic($"Processor {processor.Name}, File {file.FullPath}: Loading...");
-
-                if (canProcessorIncremental)
-                {
-                    ChangeKindWithDependency ck;
-                    string fileKey = ((RelativePath)file.File).GetPathFromWorkingFolder().ToString();
-                    if (context.ChangeDict.TryGetValue(fileKey, out ck))
-                    {
-                        Logger.LogDiagnostic($"Processor {processor.Name}, File {file.FullPath}, ChangeType {ck}.");
-                        if (ck == ChangeKindWithDependency.Deleted)
-                        {
-                            return null;
-                        }
-                        if (ck == ChangeKindWithDependency.None)
-                        {
-                            Logger.LogDiagnostic($"Processor {processor.Name}, File {file.FullPath}: Check incremental...");
-                            if (processor.BuildSteps.Cast<ISupportIncrementalBuildStep>().All(step => step.CanIncrementalBuild(file)))
-                            {
-                                Logger.LogDiagnostic($"Processor {processor.Name}, File {file.FullPath}: Skip build by incremental.");
-
-                                // to-do: remove filemap/xrefmap/manifestitem restore after processor.LoadIntermediateModel is implemented
-                                // restore filemap
-                                context.FileMap[fileKey] = ((RelativePath)file.File).GetPathFromWorkingFolder();
-
-                                // restore xrefspec
-                                var specs = xrefSpecMap?.Values?.Where(spec => spec.Href == fileKey);
-                                if (specs != null)
-                                {
-                                    foreach (var spec in specs)
-                                    {
-                                        context.XRefSpecMap[spec.Uid] = spec;
-                                    }
-                                }
-
-                                // restore dependency graph
-                                if (dg.HasDependencyReportedBy(fileKey))
-                                {
-                                    using (new LoggerPhaseScope("ReportDependencyFromLastBuild", true))
-                                    {
-                                        foreach (var l in dg.GetDependencyReportedBy(fileKey))
-                                        {
-                                            context.DependencyGraph.ReportDependency(l);
-                                        }
-                                    }
-                                }
-
-                                return null;
-                            }
-                            Logger.LogDiagnostic($"Processor {processor.Name}, File {file.FullPath}: Incremental not available.");
-                        }
-                    }
-                }
-
-                var path = Path.Combine(file.BaseDir, file.File);
-                metadata = ApplyFileMetadata(path, metadata, fileMetadata);
-                try
-                {
-                    return processor.Load(file, metadata);
-                }
-                catch (Exception)
-                {
-                    Logger.LogError($"Unable to load file: {file.File} via processor: {processor.Name}.");
-                    throw;
-                }
-            }
-        }
-
-        private static ImmutableDictionary<string, object> ApplyFileMetadata(
-            string file,
-            ImmutableDictionary<string, object> metadata,
-            FileMetadata fileMetadata)
-        {
-            if (fileMetadata == null || fileMetadata.Count == 0) return metadata;
-            var result = new Dictionary<string, object>(metadata);
-            var baseDir = string.IsNullOrEmpty(fileMetadata.BaseDir) ? Directory.GetCurrentDirectory() : fileMetadata.BaseDir;
-            var relativePath = PathUtility.MakeRelativePath(baseDir, file);
-            foreach (var item in fileMetadata)
-            {
-                // As the latter one overrides the former one, match the pattern from latter to former
-                for (int i = item.Value.Length - 1; i >= 0; i--)
-                {
-                    if (item.Value[i].Glob.Match(relativePath))
-                    {
-                        // override global metadata if metadata is defined in file metadata
-                        result[item.Value[i].Key] = item.Value[i].Value;
-                        Logger.LogVerbose($"{relativePath} matches file metadata with glob pattern {item.Value[i].Glob.Raw} for property {item.Value[i].Key}");
-                        break;
-                    }
-                }
-            }
-            return result.ToImmutableDictionary();
-        }
-
-        private static void RegisterDependencyType(HostService hostService, DocumentBuildContext context)
-        {
-            RunBuildSteps(
-                hostService.Processor.BuildSteps,
-                buildStep =>
-                {
-                    if (buildStep is ISupportIncrementalBuildStep)
-                    {
-                        Logger.LogVerbose($"Processor {hostService.Processor.Name}, step {buildStep.Name}: Registering DependencyType...");
-                        using (new LoggerPhaseScope(buildStep.Name, true))
-                        {
-                            var types = (buildStep as ISupportIncrementalBuildStep).GetDependencyTypesToRegister();
-                            if (types == null)
-                            {
-                                return;
-                            }
-                            context.DependencyGraph.RegisterDependencyType(types);
-                        }
-                    }
-                });
-        }
-
-        private static void Prebuild(HostService hostService)
-        {
-            RunBuildSteps(
-                hostService.Processor.BuildSteps,
-                buildStep =>
-                {
-                    Logger.LogVerbose($"Processor {hostService.Processor.Name}, step {buildStep.Name}: Prebuilding...");
-                    using (new LoggerPhaseScope(buildStep.Name, true))
-                    {
-                        var models = buildStep.Prebuild(hostService.Models, hostService);
-                        if (!object.ReferenceEquals(models, hostService.Models))
-                        {
-                            Logger.LogVerbose($"Processor {hostService.Processor.Name}, step {buildStep.Name}: Reloading models...");
-                            hostService.Reload(models);
-                        }
-                    }
-                });
-        }
-
-        private static void BuildArticle(HostService hostService, int maxParallelism)
-        {
-            hostService.Models.RunAll(
-                m =>
-                {
-                    using (new LoggerFileScope(m.LocalPathFromRepoRoot))
-                    {
-                        Logger.LogDiagnostic($"Processor {hostService.Processor.Name}: Building...");
-                        RunBuildSteps(
-                            hostService.Processor.BuildSteps,
-                            buildStep =>
-                            {
-                                Logger.LogDiagnostic($"Processor {hostService.Processor.Name}, step {buildStep.Name}: Building...");
-                                using (new LoggerPhaseScope(buildStep.Name, true))
-                                {
-                                    buildStep.Build(m, hostService);
-                                }
-                            });
-                    }
-                },
-                maxParallelism);
-        }
-
-        private static void Postbuild(HostService hostService)
-        {
-            RunBuildSteps(
-                hostService.Processor.BuildSteps,
-                buildStep =>
-                {
-                    Logger.LogVerbose($"Processor {hostService.Processor.Name}, step {buildStep.Name}: Postbuilding...");
-                    using (new LoggerPhaseScope(buildStep.Name, true))
-                    {
-                        buildStep.Postbuild(hostService.Models, hostService);
-                    }
-                });
-        }
-
-        private IEnumerable<ManifestItemWithContext> ExportManifest(HostService hostService, DocumentBuildContext context)
-        {
-            var manifestItems = new List<ManifestItemWithContext>();
-            using (new LoggerPhaseScope("Save", true))
-            {
-                hostService.Models.RunAll(m =>
-                {
-                    if (m.Type != DocumentType.Overwrite)
-                    {
-                        using (new LoggerFileScope(m.LocalPathFromRepoRoot))
-                        {
-                            Logger.LogDiagnostic($"Processor {hostService.Processor.Name}: Saving...");
-                            m.BaseDir = context.BuildOutputFolder;
-                            if (m.PathRewriter != null)
-                            {
-                                m.File = m.PathRewriter(m.File);
-                            }
-                            if (m.FileAndType.SourceDir != m.FileAndType.DestinationDir)
-                            {
-                                m.File = (RelativePath)m.FileAndType.DestinationDir + (((RelativePath)m.File) - (RelativePath)m.FileAndType.SourceDir);
-                            }
-                            var result = hostService.Processor.Save(m);
-                            if (result != null)
-                            {
-                                string extension = string.Empty;
-                                if (hostService.Template != null)
-                                {
-                                    if (hostService.Template.TryGetFileExtension(result.DocumentType, out extension))
-                                    {
-                                        m.File = result.FileWithoutExtension + extension;
-                                    }
-                                }
-
-                                var item = HandleSaveResult(context, hostService, m, result);
-                                item.Extension = extension;
-
-                                manifestItems.Add(new ManifestItemWithContext(item, m, hostService.Processor, hostService.Template?.GetTemplateBundle(result.DocumentType)));
-                            }
-                        }
-                    }
-                });
-            }
-            return manifestItems;
-        }
-
-        private void UpdateContext(DocumentBuildContext context)
-        {
-            context.ResolveExternalXRefSpec();
-        }
-
-        private InternalManifestItem HandleSaveResult(
-            DocumentBuildContext context,
-            HostService hostService,
-            FileModel model,
-            SaveResult result)
-        {
-            context.FileMap[model.Key] = ((RelativePath)model.File).GetPathFromWorkingFolder();
-            DocumentException.RunAll(
-                () => CheckFileLink(hostService, result),
-                () => HandleUids(context, result),
-                () => HandleToc(context, result),
-                () => RegisterXRefSpec(context, result));
-
-            return GetManifestItem(context, model, result);
-        }
-
-        private static void CheckFileLink(HostService hostService, SaveResult result)
-        {
-            result.LinkToFiles.RunAll(fileLink =>
-            {
-                if (!hostService.SourceFiles.ContainsKey(fileLink))
-                {
-                    var message = $"Invalid file link:({fileLink}).";
-                    ImmutableList<LinkSourceInfo> list;
-                    if (result.FileLinkSources.TryGetValue(fileLink, out list))
-                    {
-                        foreach (var fileLinkSourceFile in list)
-                        {
-                            Logger.LogWarning($"{message} Referenced by file: {fileLinkSourceFile.SourceFile} at line: {fileLinkSourceFile.LineNumber}.");
-                        }
-                    }
-                    else
-                    {
-                        Logger.LogWarning(message);
-                    }
-                }
-            });
-        }
-
-        private static void HandleUids(DocumentBuildContext context, SaveResult result)
-        {
-            if (result.LinkToUids.Count > 0)
-            {
-                context.XRef.UnionWith(result.LinkToUids.Where(s => s != null));
-            }
-        }
-
-        private static void HandleToc(DocumentBuildContext context, SaveResult result)
-        {
-            if (result.TocMap?.Count > 0)
-            {
-                foreach (var toc in result.TocMap)
-                {
-                    HashSet<string> list;
-                    if (context.TocMap.TryGetValue(toc.Key, out list))
-                    {
-                        foreach (var item in toc.Value)
-                        {
-                            list.Add(item);
-                        }
-                    }
-                    else
-                    {
-                        context.TocMap[toc.Key] = toc.Value;
-                    }
-                }
-            }
-        }
-
-        private void RegisterXRefSpec(DocumentBuildContext context, SaveResult result)
-        {
-            foreach (var spec in result.XRefSpecs)
-            {
-                if (!string.IsNullOrWhiteSpace(spec?.Uid))
-                {
-                    XRefSpec xref;
-                    if (context.XRefSpecMap.TryGetValue(spec.Uid, out xref))
-                    {
-                        Logger.LogWarning($"Uid({spec.Uid}) has already been defined in {((RelativePath)xref.Href).RemoveWorkingFolder()}.");
-                    }
-                    else
-                    {
-                        context.XRefSpecMap[spec.Uid] = spec.ToReadOnly();
-                    }
-                }
-            }
-            foreach (var spec in result.ExternalXRefSpecs)
-            {
-                if (!string.IsNullOrWhiteSpace(spec?.Uid))
-                {
-                    context.ReportExternalXRefSpec(spec);
-                }
-            }
-        }
-
-        private static InternalManifestItem GetManifestItem(DocumentBuildContext context, FileModel model, SaveResult result)
-        {
-            return new InternalManifestItem
-            {
-                DocumentType = result.DocumentType,
-                FileWithoutExtension = result.FileWithoutExtension,
-                ResourceFile = result.ResourceFile,
-                Key = model.Key,
-                LocalPathFromRoot = model.LocalPathFromRoot,
-                Model = model.ModelWithCache,
-                InputFolder = model.OriginalFileAndType.BaseDir,
-                Metadata = new Dictionary<string, object>((IDictionary<string, object>)model.ManifestProperties),
-            };
-        }
-
-        private static void RunBuildSteps(IEnumerable<IDocumentBuildStep> buildSteps, Action<IDocumentBuildStep> action)
-        {
-            if (buildSteps != null)
-            {
-                foreach (var buildStep in buildSteps.OrderBy(step => step.BuildOrder))
-                {
-                    action(buildStep);
-                }
-            }
-        }
-
-        private IEnumerable<HostService> GetInnerContexts(
+        private List<HostService> GetInnerContexts(
             DocumentBuildParameters parameters,
             IEnumerable<IDocumentProcessor> processors,
             TemplateProcessor templateProcessor,
-            IMarkdownService markdownService,
-            DocumentBuildContext context)
+            IHostServiceCreator creator)
         {
-            var k = from fileItem in (
-                    from file in parameters.Files.EnumerateFiles()
-                    from p in (from processor in processors
-                               let priority = processor.GetProcessingPriority(file)
-                               where priority != ProcessingPriority.NotSupported
-                               group processor by priority into ps
-                               orderby ps.Key descending
-                               select ps.ToList()).FirstOrDefault() ?? new List<IDocumentProcessor> { null }
-                    select new { file, p })
-                    group fileItem by fileItem.p;
+            var files = (from file in parameters.Files.EnumerateFiles().AsParallel().WithDegreeOfParallelism(parameters.MaxParallelism)
+                         from p in (from processor in processors
+                                    let priority = processor.GetProcessingPriority(file)
+                                    where priority != ProcessingPriority.NotSupported
+                                    group processor by priority into ps
+                                    orderby ps.Key descending
+                                    select ps.ToList()).FirstOrDefault() ?? new List<IDocumentProcessor> { null }
+                         group file by p).ToList();
 
-            var toHandleItems = k.Where(s => s.Key != null);
-            var notToHandleItems = k.Where(s => s.Key == null);
+            var toHandleItems = files.Where(s => s.Key != null);
+            var notToHandleItems = files.Where(s => s.Key == null);
             foreach (var item in notToHandleItems)
             {
                 var sb = new StringBuilder();
@@ -1016,168 +196,81 @@ namespace Microsoft.DocAsCode.Build.Engine
                 foreach (var f in item)
                 {
                     sb.Append("\t");
-                    sb.AppendLine(f.file.File);
+                    sb.AppendLine(f.File);
                 }
                 Logger.LogWarning(sb.ToString());
             }
 
-            // load last xrefspecmap and manifestitems
-            var lastXRefSpecMap = _lbv?.XRefSpecMap;
-            var lastManifest = _lbv?.Manifest;
-            var lastDependencyGraph = _lbv?.Dependency;
-
-            if (_canIncremental && lastDependencyGraph != null)
+            try
             {
-                // reregister dependency types from last dependency graph
-                using (new LoggerPhaseScope("RegisterDependencyTypeFromLastBuild", true))
-                {
-                    context.DependencyGraph.RegisterDependencyType(lastDependencyGraph.DependencyTypes.Values);
-                }
+                return (from processor in processors.AsParallel().WithDegreeOfParallelism(parameters.MaxParallelism)
+                        join item in toHandleItems.AsParallel() on processor equals item.Key into g
+                        from item in g.DefaultIfEmpty()
+                        select LoggerPhaseScope.WithScope(
+                            processor.Name,
+                            LogLevel.Verbose,
+                            () => creator.CreateHostService(
+                                parameters,
+                                templateProcessor,
+                                MarkdownService,
+                                MetadataValidators,
+                                processor,
+                                item)
+                                )).ToList();
             }
-
-            // todo : revert until PreProcessor ready
-            foreach (var pair in (from processor in processors
-                                  join item in toHandleItems on processor equals item.Key into g
-                                  from item in g.DefaultIfEmpty()
-                                  select new
-                                  {
-                                      processor,
-                                      item,
-                                  }).AsParallel().WithDegreeOfParallelism(parameters.MaxParallelism))
+            catch (AggregateException ex)
             {
-                var processorSupportIncremental = IsProcessorSupportIncremental(pair.processor);
-                ProcessorInfo cpi = null;
-                ProcessorInfo lpi = null;
-                var processorCanIncremental = processorSupportIncremental && CanProcessorIncremental(pair.processor, parameters.VersionName, out cpi, out lpi);
+                throw new DocfxException(ex.InnerException?.Message, ex);
+            }
+        }
 
-                var hostService = new HostService(
-                       parameters.Files.DefaultBaseDir,
-                       pair.item == null
-                            ? new FileModel[0]
-                            : from file in pair.item
-                              select Load(pair.processor, parameters.Metadata, parameters.FileMetadata, file.file, processorCanIncremental, lastXRefSpecMap, lastManifest, lastDependencyGraph, context) into model
-                              where model != null
-                              select model)
+        private void Prepare(
+            DocumentBuildParameters parameters,
+            DocumentBuildContext context,
+            TemplateProcessor templateProcessor,
+            string markdownServiceContextHash,
+            out IHostServiceCreator hostServiceCreator,
+            out PhaseProcessor phaseProcessor)
+        {
+            if (IntermediateFolder != null && parameters.ApplyTemplateSettings.TransformDocument)
+            {
+                using (new LoggerPhaseScope("CreateIncrementalBuildContext", LogLevel.Verbose))
                 {
-                    MarkdownService = markdownService,
-                    Processor = pair.processor,
-                    Template = templateProcessor,
-                    Validators = MetadataValidators.ToImmutableList(),
-                    ShouldTraceIncrementalInfo = processorSupportIncremental,
-                    CanIncrementalBuild = processorCanIncremental,
-                };
-
-                if (processorSupportIncremental)
+                    context.IncrementalBuildContext = IncrementalBuildContext.Create(parameters, CurrentBuildInfo, LastBuildInfo, IntermediateFolder, markdownServiceContextHash);
+                }
+                hostServiceCreator = new HostServiceCreatorWithIncremental(context);
+                phaseProcessor = new PhaseProcessor
                 {
-                    hostService.CurrentIntermediateModelManifest = cpi.IntermediateModelManifest;
-                    hostService.IncrementalBaseDir = Path.Combine(IntermediateFolder, CurrentBuildInfo.DirectoryName);
-                    if (processorCanIncremental)
+                    Handlers =
                     {
-                        hostService.LastIntermediateModelManifest = lpi?.IntermediateModelManifest;
-                        hostService.LastIncrementalBaseDir = Path.Combine(IntermediateFolder, LastBuildInfo.DirectoryName);
+                        new CompilePhaseHandler(context).WithIncremental(),
+                        new LinkPhaseHandler(context, templateProcessor).WithIncremental(),
                     }
-                }
-
-                if (pair.item != null)
+                };
+            }
+            else
+            {
+                hostServiceCreator = new HostServiceCreator(context);
+                phaseProcessor = new PhaseProcessor
                 {
-                    var allFiles = pair.item?.Select(f => f.file) ?? new FileAndType[0];
-                    var loadedFiles = hostService.Models.Select(m => m.FileAndType);
-                    hostService.ReportModelLoadInfo(allFiles.Except(loadedFiles), LoadPhase.None);
-                    hostService.ReportModelLoadInfo(loadedFiles, LoadPhase.PreBuild);
-                }
-                yield return hostService;
+                    Handlers =
+                    {
+                        new CompilePhaseHandler(context),
+                        new LinkPhaseHandler(context, templateProcessor),
+                    }
+                };
             }
-        }
-
-        private bool IsProcessorSupportIncremental(IDocumentProcessor processor)
-        {
-            if (!ShouldTraceIncrementalInfo)
-            {
-                return false;
-            }
-            if (!(processor is ISupportIncrementalDocumentProcessor))
-            {
-                Logger.LogVerbose($"Processor {processor.Name} cannot suppport incremental build because the processor doesn't implement {nameof(ISupportIncrementalDocumentProcessor)} interface.");
-                return false;
-            }
-            if (!processor.BuildSteps.All(step => step is ISupportIncrementalBuildStep))
-            {
-                Logger.LogVerbose($"Processor {processor.Name} cannot suppport incremental build because the following steps don't implement {nameof(ISupportIncrementalBuildStep)} interface: {string.Join(",", processor.BuildSteps.Where(step => !(step is ISupportIncrementalBuildStep)).Select(s => s.Name))}.");
-                return false;
-            }
-            return true;
-        }
-
-        private bool CanProcessorIncremental(IDocumentProcessor processor, string versionName, out ProcessorInfo cpi, out ProcessorInfo lpi)
-        {
-            cpi = null;
-            lpi = null;
-            cpi = CreateProcessorInfo(processor, versionName);
-
-            if (LastBuildInfo == null)
-            {
-                Logger.LogVerbose($"Processor {processor.Name} disable incremental build because no last build.");
-                return false;
-            }
-
-            lpi = _lbv
-                ?.Processors
-                ?.Find(p => p.Name == processor.Name);
-            if (lpi == null)
-            {
-                Logger.LogVerbose($"Processor {processor.Name} disable incremental build because last build doesn't contain version {versionName}.");
-                return false;
-            }
-            if (cpi.IncrementalContextHash != lpi.IncrementalContextHash)
-            {
-                Logger.LogVerbose($"Processor {processor.Name} disable incremental build because incremental context hash changed.");
-                return false;
-            }
-            if (cpi.Steps.Count != lpi.Steps.Count)
-            {
-                Logger.LogVerbose($"Processor {processor.Name} disable incremental build because steps count is different.");
-                return false;
-            }
-            for (int i = 0; i < cpi.Steps.Count; i++)
-            {
-                if (!object.Equals(cpi.Steps[i], lpi.Steps[i]))
-                {
-                    Logger.LogVerbose($"Processor {processor.Name} disable incremental build because steps changed, from step {lpi.Steps[i].ToJsonString()} to {cpi.Steps[i].ToJsonString()}.");
-                    return false;
-                }
-            }
-            Logger.LogVerbose($"Processor {processor.Name} enable incremental build.");
-            return true;
-        }
-
-        private ProcessorInfo CreateProcessorInfo(IDocumentProcessor processor, string versionName)
-        {
-            var cpi = new ProcessorInfo
-            {
-                Name = processor.Name,
-                IncrementalContextHash = ((ISupportIncrementalDocumentProcessor)processor).GetIncrementalContextHash(),
-            };
-            foreach (var step in processor.BuildSteps)
-            {
-                cpi.Steps.Add(new ProcessorStepInfo
-                {
-                    Name = step.Name,
-                    IncrementalContextHash = ((ISupportIncrementalBuildStep)step).GetIncrementalContextHash(),
-                });
-            }
-            _cbv.Processors.Add(cpi);
-            return cpi;
         }
 
         private static List<HomepageInfo> GetHomepages(DocumentBuildContext context)
         {
-            return context.GetTocInfo()
-                .Where(s => !string.IsNullOrEmpty(s.Homepage))
-                .Select(s => new HomepageInfo
-                {
-                    Homepage = RelativePath.GetPathWithoutWorkingFolderChar(s.Homepage),
-                    TocPath = RelativePath.GetPathWithoutWorkingFolderChar(context.GetFilePath(s.TocFileKey))
-                }).ToList();
+            return (from s in context.GetTocInfo()
+                    where !string.IsNullOrEmpty(s.Homepage)
+                    select new HomepageInfo
+                    {
+                        Homepage = RelativePath.GetPathWithoutWorkingFolderChar(s.Homepage),
+                        TocPath = RelativePath.GetPathWithoutWorkingFolderChar(context.GetFilePath(s.TocFileKey))
+                    }).ToList();
         }
 
         /// <summary>
@@ -1191,14 +284,14 @@ namespace Microsoft.DocAsCode.Build.Engine
                 (from xref in context.XRefSpecMap.Values.AsParallel().WithDegreeOfParallelism(parameters.MaxParallelism)
                  select new XRefSpec(xref)
                  {
-                     Href = ((RelativePath)context.FileMap[xref.Href]).RemoveWorkingFolder().ToString() + "#" + XRefDetails.GetHtmlId(xref.Uid),
+                     Href = context.UpdateHref(xref.Href, RelativePath.WorkingFolder)
                  }).ToList();
             xrefMap.Sort();
             string xrefMapFileNameWithVersion = string.IsNullOrEmpty(parameters.VersionName) ?
                 XRefMapFileName :
                 parameters.VersionName + "." + XRefMapFileName;
             YamlUtility.Serialize(
-                Path.Combine(parameters.OutputBaseDir, xrefMapFileNameWithVersion),
+                xrefMapFileNameWithVersion,
                 xrefMap,
                 YamlMime.XRefMap);
             Logger.LogInfo("XRef map exported.");
@@ -1207,16 +300,7 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         private IMarkdownService CreateMarkdownService(DocumentBuildParameters parameters, ImmutableDictionary<string, string> tokens)
         {
-            var provider = (IMarkdownServiceProvider)Container.GetExport(
-                typeof(IMarkdownServiceProvider),
-                parameters.MarkdownEngineName);
-            if (provider == null)
-            {
-                Logger.LogError($"Unable to find markdown engine: {parameters.MarkdownEngineName}");
-                throw new DocfxException($"Unable to find markdown engine: {parameters.MarkdownEngineName}");
-            }
-            Logger.LogInfo($"Markdown engine is {parameters.MarkdownEngineName}");
-            return provider.CreateMarkdownService(
+            return MarkdownServiceProvider.CreateMarkdownService(
                 new MarkdownServiceParameters
                 {
                     BasePath = parameters.Files.DefaultBaseDir,
@@ -1226,16 +310,6 @@ namespace Microsoft.DocAsCode.Build.Engine
                 });
         }
 
-        private static string ComputeConfigHash(DocumentBuildParameters parameter)
-        {
-            return JsonConvert.SerializeObject(
-                parameter,
-                new JsonSerializerSettings
-                {
-                    ContractResolver = new IncrementalCheckPropertiesResolver()
-                }).GetMd5String();
-        }
-
         public void Dispose()
         {
             foreach (var processor in Processors)
@@ -1243,23 +317,8 @@ namespace Microsoft.DocAsCode.Build.Engine
                 Logger.LogVerbose($"Disposing processor {processor.Name} ...");
                 (processor as IDisposable)?.Dispose();
             }
-        }
-
-        private sealed class ManifestItemWithContext
-        {
-            public InternalManifestItem Item { get; }
-            public FileModel FileModel { get; }
-            public IDocumentProcessor Processor { get; }
-            public TemplateBundle TemplateBundle { get; }
-
-            public TransformModelOptions Options { get; set; }
-            public ManifestItemWithContext(InternalManifestItem item, FileModel model, IDocumentProcessor processor, TemplateBundle bundle)
-            {
-                Item = item;
-                FileModel = model;
-                Processor = processor;
-                TemplateBundle = bundle;
-            }
+            (MarkdownService as IDisposable)?.Dispose();
+            MarkdownService = null;
         }
     }
 }

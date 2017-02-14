@@ -3,19 +3,19 @@
 
 namespace Microsoft.DocAsCode.Dfm
 {
+    using System;
     using System.Collections.Immutable;
     using System.IO;
     using System.Linq;
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
-    using Microsoft.DocAsCode.Utility;
 
-    public class DfmRenderer : HtmlRenderer
+    public class DfmRenderer : HtmlRenderer, IDisposable
     {
-        private static readonly DocfxFlavoredIncHelper _inlineInclusionHelper = new DocfxFlavoredIncHelper();
-        private static readonly DocfxFlavoredIncHelper _blockInclusionHelper = new DocfxFlavoredIncHelper();
-        private static readonly DfmCodeExtractor _dfmCodeExtractor = new DfmCodeExtractor();
+        private readonly DocfxFlavoredIncHelper _inlineInclusionHelper = new DocfxFlavoredIncHelper();
+        private readonly DocfxFlavoredIncHelper _blockInclusionHelper = new DocfxFlavoredIncHelper();
+        private readonly DfmCodeExtractor _dfmCodeExtractor = new DfmCodeExtractor();
 
         public ImmutableDictionary<string, string> Tokens { get; set; }
 
@@ -25,7 +25,7 @@ namespace Microsoft.DocAsCode.Dfm
             result = AppendAttribute(result, "href", token.Href);
             result = AppendAttribute(result, "title", token.Title);
             result = AppendAttribute(result, "data-throw-if-not-resolved", token.ThrowIfNotResolved.ToString());
-            result = AppendAttribute(result, "data-raw", token.SourceInfo.Markdown);
+            result = AppendAttribute(result, "data-raw-source", token.SourceInfo.Markdown);
             result = AppendSourceInfo(result, renderer, token);
             result += ">";
 
@@ -106,8 +106,9 @@ namespace Microsoft.DocAsCode.Dfm
                     var noteToken = (DfmNoteBlockToken)splitToken.Token;
                     content += "<div class=\"";
                     content += noteToken.NoteType.ToUpper();
+                    content += "\"";
                     content = AppendSourceInfo(content, renderer, splitToken.Token);
-                    content += "\">";
+                    content += ">";
                     string heading;
                     if (Tokens != null && Tokens.TryGetValue(noteToken.NoteType.ToLower(), out heading))
                     {
@@ -128,11 +129,11 @@ namespace Microsoft.DocAsCode.Dfm
                 else if (splitToken.Token is DfmVideoBlockToken)
                 {
                     var videoToken = splitToken.Token as DfmVideoBlockToken;
-                    content += "<iframe width=\"640\" height=\"320\" src=\"";
+                    content += "<div class=\"embeddedvideo\"><iframe src=\"";
                     content += videoToken.Link;
                     content += "\" frameborder=\"0\" allowfullscreen=\"true\"";
                     content = AppendSourceInfo(content, renderer, splitToken.Token);
-                    content += "></iframe>\n";
+                    content += "></iframe></div>\n";
                     continue;
                 }
                 else
@@ -150,7 +151,7 @@ namespace Microsoft.DocAsCode.Dfm
             return content;
         }
 
-        public virtual StringBuffer Render(IMarkdownRenderer renderer, DfmFencesBlockToken token, MarkdownBlockContext context)
+        public virtual StringBuffer Render(IMarkdownRenderer renderer, DfmFencesToken token, IMarkdownContext context)
         {
             if (!PathUtility.IsRelativePath(token.Path))
             {
@@ -178,6 +179,11 @@ namespace Microsoft.DocAsCode.Dfm
             }
         }
 
+        public virtual StringBuffer Render(IMarkdownRenderer renderer, DfmFencesBlockToken token, MarkdownBlockContext context)
+        {
+            return Render(renderer, token, (IMarkdownContext)context);
+        }
+
         public virtual StringBuffer Render(IMarkdownRenderer renderer, DfmNoteBlockToken token, MarkdownBlockContext context)
         {
             return token.Content;
@@ -188,15 +194,10 @@ namespace Microsoft.DocAsCode.Dfm
             return token.SourceInfo.Markdown;
         }
 
-        private static StringBuffer AppendAttribute(StringBuffer buffer, string attributeName, string value)
+        public void Dispose()
         {
-            if (string.IsNullOrEmpty(value)) return buffer;
-            buffer += " ";
-            buffer += attributeName;
-            buffer += "=\"";
-            buffer += StringHelper.HtmlEncode(value);
-            buffer += "\"";
-            return buffer;
+            _inlineInclusionHelper.Dispose();
+            _blockInclusionHelper.Dispose();
         }
     }
 }

@@ -21,7 +21,7 @@ function DotnetBuild {
     if (Test-Path (Join-Path $folder.FullName "project.json"))
     {
         & dotnet build $folder.FullName -c $configuration -f net452
-        ProcessLastExitCode($lastexitcode, "dotnet build $folder error")
+        ProcessLastExitCode $lastexitcode "dotnet build $folder error"
     }
 }
 
@@ -30,7 +30,7 @@ function DotnetPublish {
     if (Test-Path (Join-Path $folder.FullName "project.json"))
     {
         & dotnet publish $folder.FullName -c $configuration -f net452 -o target\$configuration\$folder
-        ProcessLastExitCode($lastexitcode, "dotnet publish $folder error")
+        ProcessLastExitCode $lastexitcode "dotnet publish $folder error"
     }
 }
 
@@ -39,15 +39,24 @@ function DotnetPack {
     if (Test-Path (Join-Path $folder.FullName "project.json"))
     {
         & dotnet pack $folder.FullName -c $configuration -o artifacts\$configuration
-        ProcessLastExitCode($lastexitcode, "dotnet pack $folder error")
+        ProcessLastExitCode $lastexitcode "dotnet pack $folder error"
+    }
+}
+
+function NugetPack {
+    param($basepath, $nuspec)
+    if (Test-Path $nuspec)
+    {
+        & $nuget pack $nuspec -Version $version -OutputDirectory artifacts\$configuration -BasePath $basepath
+        ProcessLastExitCode $lastexitcode "nuget pack $nuspec error"
     }
 }
 
 function ProcessLastExitCode {
     param($exitCode, $msg)
-    if ($lastexitcode -ne 0)
+    if ($exitCode -ne 0)
     {
-        Write-Error $msg + ", exit code: $lastexitcode"
+        Write-Error "$msg, exit code: $exitCode"
         Pop-Location
         Exit 1
     }
@@ -69,6 +78,7 @@ $nuget = "$env:LOCALAPPDATA\Nuget\Nuget.exe"
 if (-not(Test-Path $nuget))
 {
     Write-Host "Downloading NuGet.exe..."
+    mkdir -Path "$env:LOCALAPPDATA\Nuget" -Force
     $ProgressPreference = 'SilentlyContinue'
     [Net.WebRequest]::DefaultWebProxy.Credentials = [Net.CredentialCache]::DefaultCredentials
     Invoke-WebRequest 'https://dist.nuget.org/win-x86-commandline/latest/nuget.exe' -OutFile $nuget
@@ -77,7 +87,7 @@ if (-not(Test-Path $nuget))
 if ($raw -eq $false)
 {
     & ".\UpdateTemplate.cmd"
-    ProcessLastExitCode($lastexitcode, "Update templte error")
+    ProcessLastExitCode $lastexitcode "Update templte error"
 }
 else
 {
@@ -87,96 +97,107 @@ else
 if ($prod -eq $true)
 {
     & ".\UpdateVersion.cmd"
-    ProcessLastExitCode($lastexitcode, "Update version error")
+    ProcessLastExitCode $lastexitcode "Update version error"
+}
+
+# Get version
+$version = "1.0.0"
+if (Test-Path "TEMP\version.txt")
+{
+    $version = Get-Content "TEMP\version.txt"
+    $version = $version.Substring(1)
 }
 
 # Restore package
 Write-Host "Start to restore package"
-foreach ($folder in @("src", "test", "tools"))
+foreach ($folder in @("src", "test", "tools", "plugins"))
 {
-    Push-Location $folder
+    Set-Location $folder
     & dotnet restore
-    ProcessLastExitCode($lastexitcode, "dotnet restore $folder error")
-    Pop-Location
+    ProcessLastExitCode $lastexitcode "dotnet restore $folder error"
+    Set-Location ..
 }
 
 # Build project
 Write-Host "Start to build project"
-foreach ($folder in (dir "src"))
+foreach ($folder in (Get-ChildItem @("src", "plugins")))
 {
     DotnetBuild($folder)
 }
 
 # Publish project
 Write-Host "Start to publish project"
-foreach ($folder in (dir "src"))
+foreach ($folder in (Get-ChildItem @("src", "plugins")))
 {
     DotnetPublish($folder)
 }
 
 # Run unit test cases
 Write-Host "Start to run unit test"
-foreach ($folder in (dir "test"))
+foreach ($folder in (Get-ChildItem "test"))
 {
     if ((Test-Path (Join-Path $folder.FullName "project.json")) -and ($folder.Name -ne "Shared") -and ($folder.Name -ne "docfx.E2E.Tests"))
     {
         & dotnet test test\$folder
-        if ($lastexitcode -ne 0) { Write-Error "dotnet test $folder error, exit code: $lastexitcode"; Pop-Location }
+        ProcessLastExitCode $lastexitcode "dotnet test $folder error"
     }
 }
 
 # Build tools
 Write-Host "Build tools"
-foreach ($folder in (dir "tools"))
+foreach ($folder in (Get-ChildItem "tools"))
 {
     DotnetBuild($folder)
 }
 
 # Publish tools
 Write-Host "Publish tools"
-foreach ($folder in (dir "tools"))
+foreach ($folder in (Get-ChildItem "tools"))
 {
     DotnetPublish($folder)
 }
 
 # Pack artifacts
 Write-Host "Publish artifacts"
-foreach ($folder in (dir "src"))
+foreach ($folder in (Get-ChildItem "src"))
 {
     DotnetPack($folder)
 }
 
-# Pack docfx.console
-Copy-Item -Path "target\$configuration\docfx\*.dll" -Destination "src\nuspec\docfx.console\tools\"
-Copy-Item -Path "target\$configuration\docfx\*.exe" -Destination "src\nuspec\docfx.console\tools\"
-Copy-Item -Path "target\$configuration\docfx\*.exe.config" -Destination "src\nuspec\docfx.console\tools\"
-
-$version = "1.0.0"
-if (Test-Path "TEMP/version.txt")
+# Pack plugins
+foreach ($folder in (Get-ChildItem "plugins"))
 {
-    $version = cat "TEMP/version.txt"
-    $version = $version.Substring(1)
+    $nuspecs = Join-Path $folder.FullName "*.nuspec" -Resolve
+    if ($nuspecs)
+    {
+       foreach ($nuspec in $nuspecs)
+       {
+           NugetPack "target\$configuration\$($folder.Name)" $nuspec
+       }
+    }
+    DotnetPack($folder)
 }
-& $nuget pack "src\nuspec\docfx.console\docfx.console.nuspec" -Version $version -OutputDirectory artifacts\$configuration
-if ($lastexitcode -ne 0) { Write-Error "nuget pack docfx.console error, exit code: $lastexitcode"; Pop-Location; Pop-Location }
+
+# Pack docfx.console
+Copy-Item -Path "src\nuspec\docfx.console\build" -Destination "target\$configuration\docfx" -Force -Recurse
+Copy-Item -Path "src\nuspec\docfx.console\content" -Destination "target\$configuration\docfx" -Force -Recurse
+NugetPack "target\$configuration\docfx" "src\nuspec\docfx.console\docfx.console.nuspec"
 
 # Pack azure tools
-New-Item -ItemType Directory -Force -Path "src\nuspec\AzureMarkdownRewriterTool\tools\"
-Copy-Item -Path "target\$configuration\AzureMarkdownRewriterTool\*.dll" -Destination "src\nuspec\AzureMarkdownRewriterTool\tools\"
-Copy-Item -Path "target\$configuration\AzureMarkdownRewriterTool\*.exe" -Destination "src\nuspec\AzureMarkdownRewriterTool\tools\"
-Copy-Item -Path "target\$configuration\AzureMarkdownRewriterTool\*.exe.config" -Destination "src\nuspec\AzureMarkdownRewriterTool\tools\"
+NugetPack "target\$configuration\AzureMarkdownRewriterTool" "src\nuspec\AzureMarkdownRewriterTool\AzureMarkdownRewriterTool.nuspec"
+
+# Pack DfmHttpService
+NugetPack "target\$configuration\DfmHttpService" "src\nuspec\DfmHttpService\DfmHttpService.nuspec"
+
+# Pack MergeDeveloperComments
+NugetPack "target\$configuration\MergeDeveloperComments" "src\nuspec\MergeDeveloperComments\MergeDeveloperComments.nuspec"
+
+# Pack MergeSourceInfo
+NugetPack "target\$configuration\MergeSourceInfo" "src\nuspec\MergeSourceInfo\MergeSourceInfo.nuspec"
 
 # Build VscPreviewExe
 src\VscPreviewExtension\buildVscPreviewExe.cmd -c $configuration
-
-$version = "1.0.0"
-if (Test-Path "TEMP/version.txt")
-{
-    $version = cat "TEMP/version.txt"
-    $version = $version.Substring(1)
-}
-& $nuget pack "src\nuspec\AzureMarkdownRewriterTool\AzureMarkdownRewriterTool.nuspec" -Version $version -OutputDirectory artifacts\$configuration
-if ($lastexitcode -ne 0) { Write-Error "nuget pack AzureMarkdownRewriterTool error, exit code: $lastexitcode"; Pop-Location; Pop-Location }
+ProcessLastExitCode $lastexitcode "build VscPreviewExe error"
 
 Write-Host "Build completed."
 Pop-Location

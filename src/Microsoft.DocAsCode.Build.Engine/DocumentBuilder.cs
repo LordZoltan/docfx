@@ -18,7 +18,6 @@ namespace Microsoft.DocAsCode.Build.Engine
     using Microsoft.DocAsCode.Dfm.MarkdownValidators;
     using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     public class DocumentBuilder : IDisposable
     {
@@ -29,7 +28,6 @@ namespace Microsoft.DocAsCode.Build.Engine
         internal IEnumerable<IInputMetadataValidator> MetadataValidators { get; set; }
 
         private readonly string _intermediateFolder;
-        private readonly List<PostProcessor> _postProcessors = new List<PostProcessor>();
         private readonly CompositionHost _container;
         private readonly BuildInfo _currentBuildInfo =
             new BuildInfo
@@ -37,20 +35,26 @@ namespace Microsoft.DocAsCode.Build.Engine
                 BuildStartTime = DateTime.UtcNow,
                 DocfxVersion = typeof(DocumentBuilder).Assembly.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version
             };
-        private BuildInfo _lastBuildInfo;
+        private readonly BuildInfo _lastBuildInfo;
+        private readonly PostProcessorsManager _postProcessorsManager;
 
         public DocumentBuilder(
             IEnumerable<Assembly> assemblies,
             ImmutableArray<string> postProcessorNames,
             string templateHash,
-            string intermediateFolder = null)
+            string intermediateFolder = null,
+            string commitFromSHA = null,
+            string commitToSHA = null)
         {
             Logger.LogVerbose("Loading plug-in...");
-            using (new LoggerPhaseScope("ImportPlugins", true))
+            using (new LoggerPhaseScope("ImportPlugins", LogLevel.Verbose))
             {
-                var assemblyList = assemblies?.ToList();
-                _container = GetContainer(assemblyList);
+                var assemblyList = assemblies?.ToList() ?? new List<Assembly>();
+                assemblyList.Add(typeof(DocumentBuilder).Assembly);
+                _container = CompositionUtility.GetContainer(assemblyList);
                 _container.SatisfyImports(this);
+                _currentBuildInfo.CommitFromSHA = commitFromSHA;
+                _currentBuildInfo.CommitToSHA = commitToSHA;
                 if (intermediateFolder != null)
                 {
                     _currentBuildInfo.PluginHash = ComputePluginHash(assemblyList);
@@ -63,9 +67,17 @@ namespace Microsoft.DocAsCode.Build.Engine
             {
                 Logger.LogVerbose($"\t{processor.Name} with build steps ({string.Join(", ", from bs in processor.BuildSteps orderby bs.BuildOrder select bs.Name)})");
             }
-            _postProcessors = GetPostProcessor(postProcessorNames);
-            _intermediateFolder = intermediateFolder;
-            _lastBuildInfo = LoadLastBuildInfo();
+            if (intermediateFolder != null)
+            {
+                var expanded = Environment.ExpandEnvironmentVariables(intermediateFolder);
+                if (expanded.Length == 0)
+                {
+                    expanded = ".";
+                }
+                _intermediateFolder = Path.GetFullPath(expanded);
+            }
+            _lastBuildInfo = BuildInfo.Load(_intermediateFolder);
+            _postProcessorsManager = new PostProcessorsManager(_container, postProcessorNames);
         }
 
         public void Build(DocumentBuildParameters parameter)
@@ -73,11 +85,48 @@ namespace Microsoft.DocAsCode.Build.Engine
             Build(new DocumentBuildParameters[] { parameter }, parameter.OutputBaseDir);
         }
 
-        public void Build(IEnumerable<DocumentBuildParameters> parameters, string outputDirectory)
+        public void Build(IList<DocumentBuildParameters> parameters, string outputDirectory)
         {
+            if (parameters == null)
+            {
+                throw new ArgumentNullException(nameof(parameters));
+            }
+            if (parameters.Count == 0)
+            {
+                throw new ArgumentException("Parameters are empty.", nameof(parameters));
+            }
+
+            var markdownServiceProvider = CompositionUtility.GetExport<IMarkdownServiceProvider>(_container, parameters[0].MarkdownEngineName);
+            if (markdownServiceProvider == null)
+            {
+                Logger.LogError($"Unable to find markdown engine: {parameters[0].MarkdownEngineName}");
+                throw new DocfxException($"Unable to find markdown engine: {parameters[0].MarkdownEngineName}");
+            }
+            Logger.LogInfo($"Markdown engine is {parameters[0].MarkdownEngineName}");
+
+            _postProcessorsManager.IncrementalInitialize(_intermediateFolder, _currentBuildInfo, _lastBuildInfo, parameters[0].ForcePostProcess);
+
             var manifests = new List<Manifest>();
+            bool transformDocument = false;
             foreach (var parameter in parameters)
             {
+                if (parameter.CustomLinkResolver != null)
+                {
+                    ICustomHrefGenerator chg;
+                    if (_container.TryGetExport(parameter.CustomLinkResolver, out chg))
+                    {
+                        parameter.ApplyTemplateSettings.HrefGenerator = chg;
+                    }
+                    else
+                    {
+                        Logger.LogWarning($"Custom href generator({parameter.CustomLinkResolver}) is not found.");
+                    }
+                }
+                EnvironmentContext.FileAbstractLayerImpl =
+                    FileAbstractLayerBuilder.Default
+                    .ReadFromRealFileSystem(EnvironmentContext.BaseDirectory)
+                    .WriteToRealFileSystem(parameter.OutputBaseDir)
+                    .Create();
                 if (parameter.Files.Count == 0)
                 {
                     Logger.LogWarning(string.IsNullOrEmpty(parameter.VersionName)
@@ -86,32 +135,53 @@ namespace Microsoft.DocAsCode.Build.Engine
                     manifests.Add(new Manifest());
                     continue;
                 }
-                PrepareMetadata(parameter);
+                if (parameter.ApplyTemplateSettings.TransformDocument)
+                {
+                    transformDocument = true;
+                }
+                parameter.Metadata = _postProcessorsManager.PrepareMetadata(parameter.Metadata);
                 if (!string.IsNullOrEmpty(parameter.VersionName))
                 {
                     Logger.LogInfo($"Start building for version: {parameter.VersionName}");
                 }
-                manifests.Add(BuildCore(parameter));
+                manifests.Add(BuildCore(parameter, markdownServiceProvider));
             }
-            var generatedManifest = MergeManifest(manifests);
+            EnvironmentContext.FileAbstractLayerImpl =
+                FileAbstractLayerBuilder.Default
+                .ReadFromRealFileSystem(parameters[0].OutputBaseDir)
+                .WriteToRealFileSystem(parameters[0].OutputBaseDir)
+                .Create();
+            var generatedManifest = ManifestUtility.MergeManifest(manifests);
 
-            RemoveDuplicateOutputFiles(generatedManifest.Files);
-            PostProcess(generatedManifest, outputDirectory);
+            ManifestUtility.RemoveDuplicateOutputFiles(generatedManifest.Files);
+            _postProcessorsManager.Process(generatedManifest, outputDirectory);
 
             // Save to manifest.json
-            SaveManifest(generatedManifest, outputDirectory);
+            SaveManifest(generatedManifest);
+
+            EnvironmentContext.FileAbstractLayerImpl = null;
+
+            // overwrite intermediate cache files
+            if (_intermediateFolder != null && transformDocument)
+            {
+                _currentBuildInfo.Save(_intermediateFolder);
+                if (_lastBuildInfo != null)
+                {
+                    Directory.Delete(Path.Combine(_intermediateFolder, _lastBuildInfo.DirectoryName), true);
+                }
+            }
         }
 
-        internal Manifest BuildCore(DocumentBuildParameters parameter)
+        internal Manifest BuildCore(DocumentBuildParameters parameter, IMarkdownServiceProvider markdownServiceProvider)
         {
             using (var builder = new SingleDocumentBuilder
             {
-                Container = _container,
                 CurrentBuildInfo = _currentBuildInfo,
                 LastBuildInfo = _lastBuildInfo,
                 IntermediateFolder = _intermediateFolder,
                 MetadataValidators = MetadataValidators.Concat(GetMetadataRules(parameter)).ToList(),
                 Processors = Processors,
+                MarkdownServiceProvider = markdownServiceProvider,
             })
             {
                 return builder.Build(parameter);
@@ -127,173 +197,15 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
             catch (Exception ex)
             {
-                Logger.LogWarning($"Fail to init markdown style, details:{Environment.NewLine}{ex.ToString()}");
+                Logger.LogWarning($"Fail to init markdown style, details:{Environment.NewLine}{ex.Message}");
                 return Enumerable.Empty<IInputMetadataValidator>();
             }
         }
 
-        private void PrepareMetadata(DocumentBuildParameters parameters)
+        private static void SaveManifest(Manifest manifest)
         {
-            foreach (var postProcessor in _postProcessors)
-            {
-                using (new LoggerPhaseScope($"Prepare metadata in post processor {postProcessor.ContractName}", false))
-                using (new PerformanceScope($"Prepare metadata in post processor {postProcessor.ContractName}", LogLevel.Verbose))
-                {
-                    parameters.Metadata = postProcessor.Processor.PrepareMetadata(parameters.Metadata);
-                    if (parameters.Metadata == null)
-                    {
-                        throw new DocfxException($"Plugin {postProcessor.ContractName} should not return null metadata");
-                    }
-                }
-            }
-        }
-
-        private void PostProcess(Manifest manifest, string outputDir)
-        {
-            // post process
-            foreach (var postProcessor in _postProcessors)
-            {
-                using (new LoggerPhaseScope($"Process in post processor {postProcessor.ContractName}", false))
-                using (new PerformanceScope($"Process in post processor {postProcessor.ContractName}", LogLevel.Verbose))
-                {
-                    manifest = postProcessor.Processor.Process(manifest, outputDir);
-                    if (manifest == null)
-                    {
-                        throw new DocfxException($"Plugin {postProcessor.ContractName} should not return null manifest");
-                    }
-
-                    // To make sure post processor won't generate duplicate output files
-                    RemoveDuplicateOutputFiles(manifest.Files);
-                }
-            }
-        }
-
-        private void RemoveDuplicateOutputFiles(List<ManifestItem> manifestItems)
-        {
-            if (manifestItems == null)
-            {
-                throw new ArgumentNullException(nameof(manifestItems));
-            }
-
-            var itemsToRemove = new HashSet<string>();
-            foreach (var duplicates in from m in manifestItems
-                                       from output in m.OutputFiles.Values
-                                       let relativePath = output?.RelativePath
-                                       group m.SourceRelativePath by relativePath into g
-                                       where g.Count() > 1
-                                       select g)
-            {
-                Logger.LogWarning($"Overwrite occurs while input files \"{string.Join(", ", duplicates)}\" writing to the same output file \"{duplicates.Key}\"");
-                itemsToRemove.UnionWith(duplicates.Skip(1));
-            }
-            manifestItems.RemoveAll(m => itemsToRemove.Contains(m.SourceRelativePath));
-        }
-
-        private static Manifest MergeManifest(List<Manifest> manifests)
-        {
-            var xrefMaps = (from manifest in manifests
-                            where manifest.XRefMap != null
-                            select manifest.XRefMap).ToList();
-            return new Manifest
-            {
-                Homepages = (from manifest in manifests
-                             from homepage in manifest.Homepages ?? Enumerable.Empty<HomepageInfo>()
-                             select homepage).Distinct().ToList(),
-                Files = (from manifest in manifests
-                         from file in manifest.Files ?? Enumerable.Empty<ManifestItem>()
-                         select file).Distinct().ToList(),
-                XRefMap = xrefMaps.Count <= 1 ? xrefMaps.FirstOrDefault() : xrefMaps,
-                SourceBasePath = manifests.FirstOrDefault()?.SourceBasePath
-            };
-        }
-
-        private static void SaveManifest(Manifest manifest, string outputDirectory)
-        {
-            var manifestJsonPath = Path.Combine(outputDirectory ?? string.Empty, Constants.ManifestFileName);
-            JsonUtility.Serialize(manifestJsonPath, manifest);
-            Logger.LogInfo($"Manifest file saved to {manifestJsonPath}.");
-        }
-
-        private BuildInfo LoadLastBuildInfo()
-        {
-            if (_intermediateFolder != null &&
-                File.Exists(Path.Combine(_intermediateFolder, BuildInfo.FileName)))
-            {
-                try
-                {
-                    return BuildInfo.Load(_intermediateFolder);
-                }
-                catch (Exception)
-                {
-                }
-            }
-            return null;
-        }
-
-        private List<PostProcessor> GetPostProcessor(ImmutableArray<string> processors)
-        {
-            var processorList = new List<PostProcessor>();
-            foreach (var processor in processors)
-            {
-                var p = GetExport(typeof(IPostProcessor), processor) as IPostProcessor;
-                if (p != null)
-                {
-                    processorList.Add(new PostProcessor
-                    {
-                        ContractName = processor,
-                        Processor = p
-                    });
-                    Logger.LogInfo($"Post processor {processor} loaded.");
-                }
-                else
-                {
-                    Logger.LogWarning($"Can't find the post processor: {processor}");
-                }
-            }
-            return processorList;
-        }
-
-        private object GetExport(Type type, string name)
-        {
-            object exportedObject = null;
-            try
-            {
-                exportedObject = _container.GetExport(type, name);
-            }
-            catch (CompositionFailedException ex)
-            {
-                Logger.LogWarning($"Can't import: {name}, {ex}");
-            }
-            return exportedObject;
-        }
-
-        private static CompositionHost GetContainer(IEnumerable<Assembly> assemblies)
-        {
-            var configuration = new ContainerConfiguration();
-
-            configuration.WithAssembly(typeof(DocumentBuilder).Assembly);
-
-            if (assemblies != null)
-            {
-                foreach (var assembly in assemblies)
-                {
-                    if (assembly != null)
-                    {
-                        configuration.WithAssembly(assembly);
-                    }
-                }
-            }
-
-            try
-            {
-                return configuration.CreateContainer();
-            }
-            catch (ReflectionTypeLoadException ex)
-            {
-                Logger.LogError(
-                    $"Error when get composition container: {ex.Message}, loader exceptions: {(ex.LoaderExceptions != null ? string.Join(", ", ex.LoaderExceptions.Select(e => e.Message)) : "none")}");
-                throw;
-            }
+            JsonUtility.Serialize(Constants.ManifestFileName, manifest);
+            Logger.LogInfo($"Manifest file saved to {Constants.ManifestFileName}.");
         }
 
         private static string ComputePluginHash(List<Assembly> assemblyList)
@@ -317,26 +229,7 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public void Dispose()
         {
-            foreach (var processor in _postProcessors)
-            {
-                Logger.LogVerbose($"Disposing processor {processor.ContractName} ...");
-                (processor.Processor as IDisposable)?.Dispose();
-            }
-            if (_intermediateFolder != null)
-            {
-                // to-do: add check for build status. if failed, not overwrite buildinfo
-                _currentBuildInfo.Save(_intermediateFolder);
-                if (_lastBuildInfo != null)
-                {
-                    Directory.Delete(Path.Combine(_intermediateFolder, _lastBuildInfo.DirectoryName), true);
-                }
-            }
-        }
-
-        private sealed class PostProcessor
-        {
-            public string ContractName { get; set; }
-            public IPostProcessor Processor { get; set; }
+            _postProcessorsManager.Dispose();
         }
     }
 }

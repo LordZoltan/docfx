@@ -15,7 +15,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger
     public class SwaggerModel
     {
         /// <summary>
-        /// The original swagger.json cpntent
+        /// The original swagger.json content
         /// </summary>
         [YamlIgnore]
         [JsonIgnore]
@@ -62,7 +62,7 @@ namespace Microsoft.DocAsCode.Build.RestApi.Swagger
         /// </summary>
         [YamlMember(Alias = "definitions")]
         [JsonProperty("definitions")]
-        public object Defintions { get; set; }
+        public object Definitions { get; set; }
 
         /// <summary>
         /// An object to hold parameters that can be used across operations. This property does not define global parameters for all operations

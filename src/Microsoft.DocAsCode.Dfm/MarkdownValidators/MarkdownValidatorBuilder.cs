@@ -257,7 +257,7 @@ namespace Microsoft.DocAsCode.Dfm.MarkdownValidators
                 }
             }
             var configFile = Path.Combine(baseDir, MarkdownSytleConfig.MarkdownStyleFileName);
-            if (File.Exists(configFile))
+            if (EnvironmentContext.FileAbstractLayer.Exists(configFile))
             {
                 var config = JsonUtility.Deserialize<MarkdownSytleConfig>(configFile);
                 builder.AddMetadataValidators(config.MetadataRules);
@@ -400,7 +400,7 @@ namespace Microsoft.DocAsCode.Dfm.MarkdownValidators
                     return token.SourceInfo.Markdown;
                 }
                 if (token is MarkdownRawToken &&
-                    (token.Rule is MarkdownHtmlBlockRule || token.Rule is MarkdownCodeElementInlineRule))
+                    (token.Rule is MarkdownHtmlBlockRule || token.Rule is MarkdownPreElementInlineRule))
                 {
                     return OpeningTagMatcher.Match(token.SourceInfo.Markdown).Value;
                 }

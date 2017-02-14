@@ -12,7 +12,6 @@ namespace Microsoft.DocAsCode.Build.Engine
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     public class TemplateProcessor : IDisposable
     {
@@ -65,37 +64,44 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         internal List<ManifestItem> Process(List<InternalManifestItem> manifest, DocumentBuildContext context, ApplyTemplateSettings settings, IDictionary<string, object> globals = null)
         {
-            using (new LoggerPhaseScope("Apply Templates", true))
+            using (new LoggerPhaseScope("Apply Templates", LogLevel.Verbose))
             {
                 if (globals == null)
                 {
                     globals = Tokens.ToDictionary(pair => pair.Key, pair => (object)pair.Value);
                 }
-
-                var documentTypes = manifest.Select(s => s.DocumentType).Distinct();
-                var notSupportedDocumentTypes = documentTypes.Where(s => s != "Resource" && _templateCollection[s] == null);
-                if (notSupportedDocumentTypes.Any())
+                if (settings == null)
                 {
-                    Logger.LogWarning($"There is no template processing document type(s): {notSupportedDocumentTypes.ToDelimitedString()}");
+                    settings = context.ApplyTemplateSettings;
                 }
+
                 Logger.LogInfo($"Applying templates to {manifest.Count} model(s)...");
-
-                if (settings.Options.HasFlag(ApplyTemplateOptions.TransformDocument))
-                {
-                    var templatesInUse = documentTypes.Select(s => _templateCollection[s]).Where(s => s != null).ToList();
-                    ProcessDependencies(settings.OutputFolder, templatesInUse);
-                }
-                else
-                {
-                    Logger.LogInfo("Dryrun, no template will be applied to the documents.");
-                }
-
+                var documentTypes = new HashSet<string>(manifest.Select(s => s.DocumentType));
+                ProcessDependencies(documentTypes, settings);
                 var templateManifest = ProcessCore(manifest, context, settings, globals);
                 return templateManifest;
             }
         }
 
-        private void ProcessDependencies(string outputDirectory, IEnumerable<TemplateBundle> templateBundles)
+        internal void ProcessDependencies(HashSet<string> documentTypes, ApplyTemplateSettings settings)
+        {
+            if (settings.Options.HasFlag(ApplyTemplateOptions.TransformDocument))
+            {
+                var notSupportedDocumentTypes = documentTypes.Where(s => s != "Resource" && _templateCollection[s] == null);
+                if (notSupportedDocumentTypes.Any())
+                {
+                    Logger.LogWarning($"There is no template processing document type(s): {StringExtension.ToDelimitedString(notSupportedDocumentTypes)}");
+                }
+                var templatesInUse = documentTypes.Select(s => _templateCollection[s]).Where(s => s != null).ToList();
+                ProcessDependenciesCore(settings.OutputFolder, templatesInUse);
+            }
+            else
+            {
+                Logger.LogInfo("Dryrun, no template will be applied to the documents.");
+            }
+        }
+
+        private void ProcessDependenciesCore(string outputDirectory, IEnumerable<TemplateBundle> templateBundles)
         {
             foreach (var resourceInfo in templateBundles.SelectMany(s => s.Resources).Distinct())
             {
@@ -160,10 +166,13 @@ namespace Microsoft.DocAsCode.Build.Engine
             items.RunAll(
                 item =>
                 {
-                    var manifestItem = transformer.Transform(item);
-                    if (manifestItem.OutputFiles?.Count > 0)
+                    using (new LoggerFileScope(item.LocalPathFromRoot))
                     {
-                        manifest.Add(manifestItem);
+                        var manifestItem = transformer.Transform(item);
+                        if (manifestItem.OutputFiles?.Count > 0)
+                        {
+                            manifest.Add(manifestItem);
+                        }
                     }
                 },
                 context.MaxParallelism);

@@ -13,7 +13,6 @@ namespace Microsoft.DocAsCode.SubCommands
     using Microsoft.DocAsCode.Build.Engine;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     using Newtonsoft.Json;
 
@@ -42,9 +41,11 @@ namespace Microsoft.DocAsCode.SubCommands
         {
             var config = Config;
             var baseDirectory = config.BaseDirectory ?? Directory.GetCurrentDirectory();
-            var intermediateOutputFolder = Path.Combine(baseDirectory, "obj");
-
+            var intermediateOutputFolder = config.Destination ?? Path.Combine(baseDirectory, "obj");
+            EnvironmentContext.SetBaseDirectory(baseDirectory);
+            EnvironmentContext.SetOutputDirectory(intermediateOutputFolder);
             MergeDocument(baseDirectory, intermediateOutputFolder);
+            EnvironmentContext.Clean();
         }
 
         #region MergeCommand ctor related
@@ -109,6 +110,10 @@ namespace Microsoft.DocAsCode.SubCommands
             }
             config.FileMetadata = BuildCommand.GetFileMetadataFromOption(config.FileMetadata, options.FileMetadataFilePath, null);
             config.GlobalMetadata = BuildCommand.GetGlobalMetadataFromOption(config.GlobalMetadata, options.GlobalMetadataFilePath, null, options.GlobalMetadata);
+            if (options.TocMetadata != null)
+            {
+                config.TocMetadata = new ListWithStringFallback(options.TocMetadata);
+            }
         }
 
         private sealed class MergeConfig
@@ -143,6 +148,7 @@ namespace Microsoft.DocAsCode.SubCommands
                 OutputBaseDir = outputDirectory,
                 Metadata = config.GlobalMetadata?.ToImmutableDictionary() ?? ImmutableDictionary<string, object>.Empty,
                 FileMetadata = ConvertToFileMetadataItem(baseDirectory, config.FileMetadata),
+                TocMetadata = config.TocMetadata?.ToImmutableList() ?? ImmutableList<string>.Empty,
                 Files = GetFileCollectionFromFileMapping(
                     baseDirectory,
                     DocumentType.Article,

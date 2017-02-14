@@ -6,7 +6,7 @@ namespace Microsoft.DocAsCode
     using System;
     using System.Collections.Generic;
 
-    using Microsoft.DocAsCode.Utility;
+    using Microsoft.DocAsCode.Common;
 
     using Newtonsoft.Json;
 
@@ -72,6 +72,9 @@ namespace Microsoft.DocAsCode
         [JsonProperty("force")]
         public bool? Force { get; set; }
 
+        [JsonProperty("forcePostProcess")]
+        public bool? ForcePostProcess { get; set; }
+
         [JsonProperty("port")]
         public string Port { get; set; }
 
@@ -111,5 +114,8 @@ namespace Microsoft.DocAsCode
 
         [JsonProperty("changesFile")]
         public string ChangesFile { get; set; }
+
+        [JsonProperty("customLinkResolver")]
+        public string CustomLinkResolver { get; set; }
     }
 }

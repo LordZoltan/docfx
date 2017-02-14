@@ -28,6 +28,8 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference.Tests
         ```
     </summary>
     <remarks>
+    <see href=""https://example.org""/>
+    <see href=""https://example.org"">example</see>
     <para>This is <paramref name='ref'/> <paramref />a sample of exception node</para>
     <list type='bullet'>
         <item>
@@ -86,30 +88,32 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference.Tests
     </example>
     <see cref=""T:Microsoft.DocAsCode.EntityModel.SpecIdHelper""/>
     <see cref=""T:System.Diagnostics.SourceSwitch""/>
+    <see cref=""Overload:System.String.Compare""/>
     <see href=""http://exception.com"">Global See section</see>
+    <see href=""http://exception.com""/>
     <seealso cref=""T:System.IO.WaitForChangedResult""/>
     <seealso cref=""!:http://google.com"">ABCS</seealso>
     <seealso href=""http://www.bing.com"">Hello Bing</seealso>
-
+    <seealso href=""http://www.bing.com""/>
 </member>";
             var context = new TripleSlashCommentParserContext
             {
                 AddReferenceDelegate = null,
-                Normalize = true,
                 PreserveRawInlineComments = false,
             };
 
 
             var commentModel = TripleSlashCommentModel.CreateModel(input, SyntaxLanguage.CSharp, context);
+            Assert.False(commentModel.IsInheritDoc, nameof(commentModel.IsInheritDoc));
 
             var summary = commentModel.Summary;
             Assert.Equal(@"
-    Parital classes <xref href=""System.AccessViolationException"" data-throw-if-not-resolved=""false""></xref><xref href=""System.AccessViolationException"" data-throw-if-not-resolved=""false""></xref>can not cross assemblies, Test <xref uid=""langword_csharp_null"" name=""null"" href=""""></xref>
+Parital classes <xref href=""System.AccessViolationException"" data-throw-if-not-resolved=""false""></xref><xref href=""System.AccessViolationException"" data-throw-if-not-resolved=""false""></xref>can not cross assemblies, Test <xref uid=""langword_csharp_null"" name=""null"" href=""""></xref>
 
 
-    ```
-    Classes in assemblies are by definition complete.
-    ```
+```
+Classes in assemblies are by definition complete.
+```
 ".Replace("\r\n", "\n"), summary);
 
             var returns = commentModel.Returns;
@@ -120,7 +124,9 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference.Tests
 
             var remarks = commentModel.Remarks;
             Assert.Equal(@"
-<p>This is <em>ref</em> a sample of exception node</p>
+<a href=""https://example.org"">https://example.org</a>
+<a href=""https://example.org"">example</a>
+<p>This is <span class=""paramref"">ref</span> a sample of exception node</p>
 <ul><li>
 <pre><code class=""c#"">public class XmlElement
     : XmlLinkedNode</code></pre>
@@ -162,18 +168,42 @@ Check empty code.
             commentModel = TripleSlashCommentModel.CreateModel(input, SyntaxLanguage.CSharp, context);
 
             var sees = commentModel.Sees;
-            Assert.Equal(3, sees.Count);
+            Assert.Equal(5, sees.Count);
             Assert.Equal("Microsoft.DocAsCode.EntityModel.SpecIdHelper", sees[0].LinkId);
             Assert.Null(sees[0].AltText);
-            Assert.Equal("http://exception.com", sees[2].LinkId);
-            Assert.Equal("Global See section", sees[2].AltText);
+            Assert.Equal("System.String.Compare*", sees[2].LinkId);
+            Assert.Null(sees[1].AltText);
+            Assert.Equal("http://exception.com", sees[3].LinkId);
+            Assert.Equal("Global See section", sees[3].AltText);
+            Assert.Equal("http://exception.com", sees[4].AltText);
+            Assert.Equal("http://exception.com", sees[4].LinkId);
 
             var seeAlsos = commentModel.SeeAlsos;
-            Assert.Equal(2, seeAlsos.Count);
+            Assert.Equal(3, seeAlsos.Count);
             Assert.Equal("System.IO.WaitForChangedResult", seeAlsos[0].LinkId);
             Assert.Null(seeAlsos[0].AltText);
             Assert.Equal("http://www.bing.com", seeAlsos[1].LinkId);
             Assert.Equal("Hello Bing", seeAlsos[1].AltText);
+            Assert.Equal("http://www.bing.com", seeAlsos[2].AltText);
+            Assert.Equal("http://www.bing.com", seeAlsos[2].LinkId);
+        }
+
+        [Trait("Related", "TripleSlashComments")]
+        [Fact]
+        public void InheritDoc()
+        {
+            const string input = @"
+<member name=""M:ClassLibrary1.MyClass.DoThing"">
+    <inheritdoc />
+</member>";
+            var context = new TripleSlashCommentParserContext
+            {
+                AddReferenceDelegate = null,
+                PreserveRawInlineComments = false,
+            };
+
+            var commentModel = TripleSlashCommentModel.CreateModel(input, SyntaxLanguage.CSharp, context);
+            Assert.True(commentModel.IsInheritDoc);
         }
     }
 }

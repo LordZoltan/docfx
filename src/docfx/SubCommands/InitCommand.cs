@@ -12,7 +12,6 @@ namespace Microsoft.DocAsCode.SubCommands
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     using Newtonsoft.Json;
 
@@ -237,7 +236,7 @@ namespace Microsoft.DocAsCode.SubCommands
                 }
                 else
                 {
-                    outputFolder = Path.GetFullPath(string.IsNullOrEmpty(_options.OutputFolder) ? DefaultOutputFolder : _options.OutputFolder).ToDisplayPath();
+                    outputFolder = StringExtension.ToDisplayPath(Path.GetFullPath(string.IsNullOrEmpty(_options.OutputFolder) ? DefaultOutputFolder : _options.OutputFolder));
                     GenerateSeedProject(outputFolder, config);
                 }
             }
@@ -249,7 +248,7 @@ namespace Microsoft.DocAsCode.SubCommands
 
         private static void GenerateConfigFile(string outputFolder, object config)
         {
-            var path = Path.Combine(outputFolder ?? string.Empty, ConfigName).ToDisplayPath();
+            var path = StringExtension.ToDisplayPath(Path.Combine(outputFolder ?? string.Empty, ConfigName));
             if (File.Exists(path))
             {
                 if (!ProcessOverwriteQuestion($"Config file \"{path}\" already exists, do you want to overwrite this file?"))
@@ -286,7 +285,7 @@ namespace Microsoft.DocAsCode.SubCommands
             foreach (var folder in folders)
             {
                 Directory.CreateDirectory(folder);
-                $"Created folder {folder.ToDisplayPath()}".WriteLineToConsole(ConsoleColor.Gray);
+                $"Created folder {StringExtension.ToDisplayPath(folder)}".WriteLineToConsole(ConsoleColor.Gray);
             }
 
             // 2. Create default files
@@ -346,16 +345,16 @@ TODO: Add .NET projects to the *src* folder and run `docfx` to generate **REAL**
                     Directory.CreateDirectory(dir);
                 }
                 File.WriteAllText(filePath, content);
-                $"Created File {filePath.ToDisplayPath()}".WriteLineToConsole(ConsoleColor.Gray);
+                $"Created File {StringExtension.ToDisplayPath(filePath)}".WriteLineToConsole(ConsoleColor.Gray);
             }
 
             // 2. Create docfx.json
             var path = Path.Combine(outputFolder ?? string.Empty, ConfigName);
             SaveConfigFile(path, config);
-            $"Created config file {path.ToDisplayPath()}".WriteLineToConsole(ConsoleColor.Gray);
-            $"Successfully generated default docfx project to {outputFolder.ToDisplayPath()}".WriteLineToConsole(ConsoleColor.Green);
+            $"Created config file {StringExtension.ToDisplayPath(path)}".WriteLineToConsole(ConsoleColor.Gray);
+            $"Successfully generated default docfx project to {StringExtension.ToDisplayPath(outputFolder)}".WriteLineToConsole(ConsoleColor.Green);
             "Please run:".WriteLineToConsole(ConsoleColor.Gray);
-            $"\tdocfx \"{path.ToDisplayPath()}\" --serve".WriteLineToConsole(ConsoleColor.White);
+            $"\tdocfx \"{StringExtension.ToDisplayPath(path)}\" --serve".WriteLineToConsole(ConsoleColor.White);
             "To generate a default docfx website.".WriteLineToConsole(ConsoleColor.Gray);
         }
 

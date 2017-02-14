@@ -23,9 +23,16 @@ namespace Microsoft.DocAsCode.MarkdownLite
 
         public string CurrentMarkdown { get; private set; }
 
+        public bool IsInParagraph { get; set; }
+
         public int LineNumber => _lineNumber;
 
         public string File => _file;
+
+        public SourceInfo ToSourceInfo()
+        {
+            return SourceInfo.Create(CurrentMarkdown, _file, _lineNumber);
+        }
 
         public SourceInfo Consume(int charCount)
         {

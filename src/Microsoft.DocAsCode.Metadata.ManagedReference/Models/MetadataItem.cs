@@ -5,13 +5,14 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
 {
     using System;
     using System.Collections.Generic;
+    using System.Linq;
 
     using Newtonsoft.Json;
     using YamlDotNet.Serialization;
 
+    using Microsoft.DocAsCode.Common.EntityMergers;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.DataContracts.ManagedReference;
-    using Microsoft.DocAsCode.Utility.EntityMergers;
 
     public class MetadataItem : ICloneable
     {
@@ -97,6 +98,10 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         [JsonProperty("syntax")]
         public SyntaxDetail Syntax { get; set; }
 
+        [YamlMember(Alias = "overload")]
+        [JsonProperty("overload")]
+        public string Overload { get; set; }
+
         [YamlMember(Alias = "overridden")]
         [JsonProperty("overridden")]
         public string Overridden { get; set; }
@@ -116,6 +121,10 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         [YamlMember(Alias = "inheritance")]
         [JsonProperty("inheritance")]
         public List<string> Inheritance { get; set; }
+
+        [YamlMember(Alias = "derivedClasses")]
+        [JsonProperty("derivedClasses")]
+        public List<string> DerivedClasses { get; set; }
 
         [YamlMember(Alias = "implements")]
         [JsonProperty("implements")]
@@ -148,6 +157,10 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
 
         [YamlIgnore]
         [JsonIgnore]
+        public bool IsInheritDoc { get; set; }
+
+        [YamlIgnore]
+        [JsonIgnore]
         public TripleSlashCommentModel CommentModel { get; set; }
 
         public override string ToString()
@@ -158,6 +171,31 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         public object Clone()
         {
             return MemberwiseClone();
+        }
+
+        public void CopyInheritedData(MetadataItem src)
+        {
+            if (src == null)
+                throw new ArgumentNullException(nameof(src));
+
+            if (Summary == null)
+                Summary = src.Summary;
+            if (Remarks == null)
+                Remarks = src.Remarks;
+
+            if (Exceptions == null && src.Exceptions != null)
+                Exceptions = src.Exceptions.Select(e => e.Clone()).ToList();
+            if (Sees == null && src.Sees != null)
+                Sees = src.Sees.Select(s => s.Clone()).ToList();
+            if (SeeAlsos == null && src.SeeAlsos != null)
+                SeeAlsos = src.SeeAlsos.Select(s => s.Clone()).ToList();
+            if (Examples == null && src.Examples != null)
+                Examples = new List<string>(src.Examples);
+
+            if (CommentModel != null && src.CommentModel != null)
+                CommentModel.CopyInheritedData(src.CommentModel);
+            if (Syntax != null && src.Syntax != null)
+                Syntax.CopyInheritedData(src.Syntax);
         }
     }
 }

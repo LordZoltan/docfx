@@ -4,6 +4,7 @@
 namespace Microsoft.DocAsCode.Plugins
 {
     using System;
+    using System.Collections.Generic;
     using System.Collections.Immutable;
     using System.Dynamic;
     using System.Runtime.Serialization;
@@ -26,12 +27,15 @@ namespace Microsoft.DocAsCode.Plugins
             }
 
             FileAndType = ft;
+            Serializer = serializer;
             ModelWithCache = new ModelWithCache(content, serializer);
         }
 
         public FileAndType FileAndType { get; private set; }
 
         public FileAndType OriginalFileAndType { get; private set; }
+
+        public IFormatter Serializer { get; private set; }
 
         public ModelWithCache ModelWithCache { get; }
 
@@ -77,9 +81,6 @@ namespace Microsoft.DocAsCode.Plugins
 
         public string Key { get; }
 
-        [Obsolete]
-        public Func<string, string> PathRewriter => FileAndType.PathRewriter;
-
         public ImmutableHashSet<string> LinkToFiles { get; set; } = ImmutableHashSet<string>.Empty;
 
         public ImmutableHashSet<string> LinkToUids { get; set; } = ImmutableHashSet<string>.Empty;
@@ -91,8 +92,6 @@ namespace Microsoft.DocAsCode.Plugins
         public dynamic Properties { get; } = new ExpandoObject();
 
         public dynamic ManifestProperties { get; } = new ExpandoObject();
-
-        public string LocalPathFromRepoRoot { get; set; }
 
         public string LocalPathFromRoot
         {

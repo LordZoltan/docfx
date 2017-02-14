@@ -26,6 +26,9 @@ namespace Microsoft.DocAsCode
         [Option("logLevel", HelpText = "Specify to which log level will be logged. By default log level >= Info will be logged. The acceptable value could be Verbose, Info, Warning, Error.")]
         public LogLevel? LogLevel { get; set; }
 
+        [Option("repositoryRoot", HelpText = "Specify the GIT repository root folder.")]
+        public string RepoRoot { get; set; }
+
         [OptionList("content", Separator = ',', HelpText = "Specifies content files for generating documentation.")]
         public List<string> Content { get; set; }
 
@@ -37,5 +40,8 @@ namespace Microsoft.DocAsCode
 
         [Option("fileMetadataFile", HelpText = "Specify a JSON file path containing fileMetadata settings, as similar to {\"fileMetadata\":{\"key\":\"value\"}}. It overrides the fileMetadata settings from the config file.")]
         public string FileMetadataFilePath { get; set; }
+
+        [OptionList("tocMetadata", Separator = ',', HelpText = "Specify metadata names that need to be merged into toc file")]
+        public List<string> TocMetadata { get; set; }
     }
 }

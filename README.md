@@ -10,17 +10,13 @@
 
 ## What is it?
 *DocFX* makes it extremely easy to generate your developer hub with API reference, landing page, and how-to.
-There are currently two versions of the tool:
-
-1. Exe version which can be used as a command-line tool or inside VS IDE.
-2. DNX version which can be run cross platform.
 
 We currently support C# and VB projects.
 
 ## How to build?
 #### Prerequisites
 1. [Microsoft Build Tools 2015](https://www.microsoft.com/en-us/download/details.aspx?id=48159)
-2. [.NET Core 1.0.0 SDK 1.0.0-preview2-003121](https://go.microsoft.com/fwlink/?LinkID=809122)
+2. .NET Core 1.0.0 SDK 1.0.0-preview2-003121 [x86](https://go.microsoft.com/fwlink/?LinkID=809123) | [x64](https://go.microsoft.com/fwlink/?LinkID=809122)
 3. [Node.js](https://nodejs.org)
 
 #### Steps
@@ -35,6 +31,19 @@ We currently support C# and VB projects.
 
 ## How do I play with *DocFX*?
 Please refer to [Getting Started](http://dotnet.github.io/docfx/tutorial/docfx_getting_started.html).
+
+## Integrate with Continuous Integration environment
+
+1. Install docfx through [chocolatey package](https://chocolatey.org/packages/docfx)
+`cinst docfx -y`
+
+2. Call docfx
+`docfx docfx.json`
+
+[docfx-seed](https://github.com/docascode/docfx-seed/blob/master/appveyor.yml) project provides a sample integrating with AppVeyor.
+
+> [!NOTE]
+> *Known issue in AppVeyor*: Currently `platform: Any CPU` in *appveyor.yml* causes `docfx metadata` failure. https://github.com/dotnet/docfx/issues/1078
 
 ## What's included?
 File/Folder     | Description

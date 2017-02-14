@@ -15,10 +15,12 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         {
             new LayoutCheckAndCleanup(),
             new SetParent(),
+            new CopyInherited(),
             new ResolveReference(),
             new NormalizeSyntax(),
             new BuildMembers(),
-            new BuildToc(),
+            new SetDerivedClass(),
+            new BuildToc()
         };
 
         /// <summary>
@@ -45,6 +47,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             {
                 ApiFolder = apiFolder,
                 References = allReferences,
+                Members = allMembers,
                 PreserveRawInlineComments = preserveRawInlineComments,
             };
 

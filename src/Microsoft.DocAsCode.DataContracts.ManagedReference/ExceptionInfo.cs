@@ -4,11 +4,12 @@
 namespace Microsoft.DocAsCode.DataContracts.ManagedReference
 {
     using System;
-    using YamlDotNet.Serialization;
 
+    using Microsoft.DocAsCode.Common.EntityMergers;
     using Microsoft.DocAsCode.DataContracts.Common;
-    using Microsoft.DocAsCode.Utility.EntityMergers;
+
     using Newtonsoft.Json;
+    using YamlDotNet.Serialization;
 
     [Serializable]
     public class ExceptionInfo
@@ -16,14 +17,22 @@ namespace Microsoft.DocAsCode.DataContracts.ManagedReference
         [YamlMember(Alias = "type")]
         [MergeOption(MergeOption.MergeKey)]
         [JsonProperty("type")]
+        [UniqueIdentityReference]
         public string Type { get; set; }
 
         [YamlMember(Alias = Constants.PropertyName.CommentId)]
         [JsonProperty(Constants.PropertyName.CommentId)]
+        [MergeOption(MergeOption.Ignore)]
         public string CommentId { get; set; }
 
         [YamlMember(Alias = "description")]
         [JsonProperty("description")]
+        [MarkdownContent]
         public string Description { get; set; }
+
+        public ExceptionInfo Clone()
+        {
+            return (ExceptionInfo)MemberwiseClone();
+        }
     }
 }

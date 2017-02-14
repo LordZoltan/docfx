@@ -10,7 +10,7 @@ namespace Microsoft.DocAsCode
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Glob;
-    using Microsoft.DocAsCode.Utility;
+
 
     internal class GlobUtility
     {
@@ -33,7 +33,7 @@ namespace Microsoft.DocAsCode
                 if (files.Length == 0)
                 {
                     var currentSrcFullPath = string.IsNullOrEmpty(src) ? Directory.GetCurrentDirectory() : Path.GetFullPath(src);
-                    Logger.LogInfo($"No files are found with glob pattern {item.Files.ToDelimitedString() ?? "<none>"}, excluding {item.Exclude.ToDelimitedString() ?? "<none>"}, under directory \"{currentSrcFullPath}\"");
+                    Logger.LogInfo($"No files are found with glob pattern {StringExtension.ToDelimitedString(item.Files) ?? "<none>"}, excluding {StringExtension.ToDelimitedString(item.Exclude) ?? "<none>"}, under directory \"{currentSrcFullPath}\"");
                     CheckPatterns(item.Files);
                 }
                 expandedFileMapping.Add(
@@ -69,7 +69,7 @@ namespace Microsoft.DocAsCode
 
             if (patterns.Any(s => s.Contains("../")))
             {
-                Logger.LogWarning("NOTE that `../` is currently not supported in glob pattern, please use `../` in `cwd` option instead.");
+                Logger.LogWarning("NOTE that `../` is currently not supported in glob pattern, please use `../` in `src` option instead.");
             }
         }
     }

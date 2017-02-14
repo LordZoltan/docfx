@@ -20,7 +20,7 @@ namespace Microsoft.DocAsCode.Dfm
 
         // C# code snippet region block: start -> #region snippetname, end -> #endregion
         private static readonly Regex CSharpCodeSnippetRegionStartLineRegex = new Regex(@"^\s*#\s*region\s+(?<name>.+?)\s*$", RegexOptions.Compiled);
-        private static readonly Regex CSharpCodeSnippetRegionEndLineRegex = new Regex(@"^\s*#\s*endregion\s*$", RegexOptions.Compiled);
+        private static readonly Regex CSharpCodeSnippetRegionEndLineRegex = new Regex(@"^\s*#\s*endregion(?:\s.*)?$", RegexOptions.Compiled);
 
         // VB code snippet comment block: ' <[/]snippetname>
         private static readonly Regex VBCodeSnippetCommentStartLineRegex = new Regex(@"^\s*\'\s*\<\s*(?<name>[\w\.]+)\s*\>\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -28,7 +28,7 @@ namespace Microsoft.DocAsCode.Dfm
 
         // VB code snippet Region block: start -> # Region "snippetname", end -> # End Region
         private static readonly Regex VBCodeSnippetRegionRegionStartLineRegex = new Regex(@"^\s*#\s*Region\s*(?<name>.+?)\s*$", RegexOptions.Compiled);
-        private static readonly Regex VBCodeSnippetRegionRegionEndLineRegex = new Regex(@"^\s*#\s*End\s+Region\s*$", RegexOptions.Compiled);
+        private static readonly Regex VBCodeSnippetRegionRegionEndLineRegex = new Regex(@"^\s*#\s*End\s+Region(?:\s.*)?$", RegexOptions.Compiled);
 
         // C++ code snippet block: // <[/]snippetname>
         private static readonly Regex CPlusPlusCodeSnippetCommentStartLineRegex = new Regex(@"^\s*\/{2}\s*\<\s*(?<name>[\w\.]+)\s*\>\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -198,7 +198,7 @@ namespace Microsoft.DocAsCode.Dfm
         private readonly ConcurrentDictionary<string, Lazy<ConcurrentDictionary<string, DfmTagNameResolveResult>>> _dfmTagNameLineRangeCache
             = new ConcurrentDictionary<string, Lazy<ConcurrentDictionary<string, DfmTagNameResolveResult>>>(StringComparer.OrdinalIgnoreCase);
 
-        public override bool ValidateAndPrepare(string[] lines, DfmFencesBlockToken token)
+        public override bool ValidateAndPrepare(string[] lines, DfmFencesToken token)
         {
             // NOTE: Parsing language and removing comment lines only do for tag name representation
             var lang = GetCodeLanguageOrExtension(token);
@@ -253,7 +253,7 @@ namespace Microsoft.DocAsCode.Dfm
         }
 
 
-        private static string GetCodeLanguageOrExtension(DfmFencesBlockToken token)
+        private static string GetCodeLanguageOrExtension(DfmFencesToken token)
         {
             return !string.IsNullOrEmpty(token.Lang) ? token.Lang : Path.GetExtension(token.Path);
         }

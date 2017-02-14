@@ -6,7 +6,7 @@ namespace Microsoft.DocAsCode
     using System;
     using System.Collections.Generic;
 
-    using Microsoft.DocAsCode.Utility;
+    using Microsoft.DocAsCode.Common;
 
     using Newtonsoft.Json;
 
@@ -38,5 +38,8 @@ namespace Microsoft.DocAsCode
         /// </summary>
         [JsonProperty("fileMetadata")]
         public Dictionary<string, FileMetadataPairs> FileMetadata { get; set; }
+
+        [JsonProperty("tocMetadata")]
+        public ListWithStringFallback TocMetadata { get; set; }
     }
 }

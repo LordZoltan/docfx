@@ -27,6 +27,9 @@ namespace Microsoft.DocAsCode
         [Option("logLevel", HelpText = "Specify to which log level will be logged. By default log level >= Info will be logged. The acceptable value could be Verbose, Info, Warning, Error.")]
         public LogLevel? LogLevel { get; set; }
 
+        [Option("repositoryRoot", HelpText = "Specify the GIT repository root folder.")]
+        public string RepoRoot { get; set; }
+
         [OptionList("content", Separator = ',', HelpText = "Specify content files for generating documentation.")]
         public List<string> Content { get; set; }
 
@@ -56,6 +59,9 @@ namespace Microsoft.DocAsCode
 
         [Option('f', "force", HelpText = "Force re-build all the documentation")]
         public bool ForceRebuild { get; set; }
+
+        [Option("forcePostProcess", HelpText = "Force to re-process the documentation in post processors. It will be cascaded from force option.")]
+        public bool ForcePostProcess { get; set; }
 
         [Option("globalMetadata", HelpText = "Specify global metadata key-value pair in json format. It overrides the globalMetadata settings from the config file.")]
         public string GlobalMetadata { get; set; }

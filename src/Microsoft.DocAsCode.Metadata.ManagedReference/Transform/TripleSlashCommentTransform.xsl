@@ -28,9 +28,9 @@
   </xsl:template>
 
   <xsl:template match="languageKeyword">
-    <strong>
+    <span class="languagekeyword">
       <xsl:apply-templates />
-    </strong>
+    </span>
   </xsl:template>
 
   <xsl:template match="ui">
@@ -80,31 +80,61 @@
   <xsl:template match="see[@href and not(parent::member)]">
     <a>
       <xsl:apply-templates select="@*|node()"/>
+      <xsl:if test="not(text())">
+        <xsl:value-of select="@href"/>
+      </xsl:if>
     </a>
   </xsl:template>
 
   <xsl:template match="seealso[@href and not(parent::member)]">
     <a>
       <xsl:apply-templates select="@*|node()"/>
+      <xsl:if test="not(text())">
+        <xsl:value-of select="@href"/>
+      </xsl:if>
     </a>
   </xsl:template>
 
   <xsl:template match="paramref">
     <xsl:if test="normalize-space(@name)">
-      <em>
+      <span class="paramref">
         <xsl:value-of select="@name" />
-      </em>
+      </span>
     </xsl:if>
   </xsl:template>
 
   <xsl:template match="typeparamref">
     <xsl:if test="normalize-space(@name)">
-      <em>
+      <span class="typeparamref">
         <xsl:value-of select="@name" />
-      </em>
+      </span>
     </xsl:if>
   </xsl:template>
 
+  <xsl:template match="note">
+    <xsl:variable name="type">
+       <xsl:choose>
+          <xsl:when test="not(normalize-space(@type) = '')">
+            <xsl:value-of select="@type"/>
+          </xsl:when>
+          <xsl:otherwise>note</xsl:otherwise>
+       </xsl:choose>    
+    </xsl:variable>
+    <div>
+      <xsl:attribute name="class">
+        <xsl:choose>
+          <xsl:when test="$type = 'tip'">TIP</xsl:when>
+          <xsl:when test="$type = 'warning'">WARNING</xsl:when>
+          <xsl:when test="$type = 'caution'">CAUTION</xsl:when>
+          <xsl:when test="$type = 'important'">IMPORTANT</xsl:when>
+          <xsl:otherwise>NOTE</xsl:otherwise>
+        </xsl:choose>    
+      </xsl:attribute>
+      <h5><xsl:value-of select="$type"/></h5>
+      <p><xsl:apply-templates select="node()"/></p>
+    </div>
+  </xsl:template>
+  
   <xsl:template match="list">
     <xsl:variable name="listtype">
       <xsl:value-of select="normalize-space(@type)"/>

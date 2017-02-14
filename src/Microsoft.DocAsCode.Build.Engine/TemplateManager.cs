@@ -8,11 +8,10 @@ namespace Microsoft.DocAsCode.Build.Engine
     using System.IO;
     using System.Linq;
     using System.Reflection;
+    using System.Security.Cryptography;
     using System.Text;
 
     using Microsoft.DocAsCode.Common;
-    using Microsoft.DocAsCode.Utility;
-    using System.Security.Cryptography;
 
     [Serializable]
     public class TemplateManager
@@ -40,11 +39,15 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public string GetTemplatesHash()
         {
+            if (_templates == null)
+            {
+                return null;
+            }
             var sb = new StringBuilder();
             using (var templateResource = CreateTemplateResource(_templates))
             using (var md5 = MD5.Create())
             {
-                foreach (var name in from n in templateResource.Names
+                foreach (var name in from n in templateResource.Names ?? Enumerable.Empty<string>()
                                      orderby n
                                      select n)
                 {
@@ -58,7 +61,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                     sb.Append(";");
                 }
             }
-            return sb.ToString().GetMd5String();
+            return StringExtension.GetMd5String(sb.ToString());
         }
 
         private CompositeResourceCollectionWithOverridden CreateTemplateResource(IEnumerable<string> resources) =>
@@ -67,7 +70,7 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public void ProcessTheme(string outputDirectory, bool overwrite)
         {
-            using (new LoggerPhaseScope("Apply Theme", true))
+            using (new LoggerPhaseScope("Apply Theme", LogLevel.Verbose))
             {
                 if (_themes != null && _themes.Count > 0)
                 {
@@ -84,12 +87,12 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (!resourceNames.Any()) return false;
             bool isEmpty = true;
 
-            using (new LoggerPhaseScope("ExportResourceFiles", true))
+            using (new LoggerPhaseScope("ExportResourceFiles", LogLevel.Verbose))
             using (var templateResource = CreateTemplateResource(resourceNames))
             {
                 if (templateResource.IsEmpty)
                 {
-                    Logger.Log(LogLevel.Warning, $"No resource found for [{resourceNames.ToDelimitedString()}].");
+                    Logger.Log(LogLevel.Warning, $"No resource found for [{StringExtension.ToDelimitedString(resourceNames)}].");
                 }
                 else
                 {

@@ -9,9 +9,9 @@ namespace Microsoft.DocAsCode.Build.Common
     using System.IO;
     using System.Linq;
 
-    using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.Common;
-    using Microsoft.DocAsCode.Utility;
+    using Microsoft.DocAsCode.Common.Git;
+    using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.Plugins;
 
     public class MarkdownReader
@@ -19,21 +19,22 @@ namespace Microsoft.DocAsCode.Build.Common
         public static IEnumerable<OverwriteDocumentModel> ReadMarkdownAsOverwrite(IHostService host, FileAndType ft)
         {
             // Order the list from top to bottom
-            var markdown = File.ReadAllText(ft.FullPath);
+            var markdown = EnvironmentContext.FileAbstractLayer.ReadAllText(ft.File);
             var parts = MarkupMultiple(host, markdown, ft);
             return parts.Select(part => TransformModel(ft.FullPath, part));
         }
 
-        public static Dictionary<string, object> ReadMarkdownAsConceptual(string baseDir, string file)
+        public static Dictionary<string, object> ReadMarkdownAsConceptual(string file)
         {
-            var filePath = Path.Combine(baseDir, file);
-            var repoInfo = GitUtility.GetGitDetail(filePath);
+            var filePath = EnvironmentContext.FileAbstractLayer.GetPhysicalPath(file);
+            var repoInfo = GitUtility.TryGetFileDetail(filePath);
             return new Dictionary<string, object>
             {
-                [Constants.PropertyName.Conceptual] = File.ReadAllText(filePath),
+                [Constants.PropertyName.Conceptual] = EnvironmentContext.FileAbstractLayer.ReadAllText(file),
                 [Constants.PropertyName.Type] = "Conceptual",
-                [Constants.PropertyName.Source] = new SourceDetail() { Remote = repoInfo },
+                [Constants.PropertyName.Source] = new SourceDetail { Remote = repoInfo },
                 [Constants.PropertyName.Path] = file,
+                [Constants.PropertyName.Documentation] = new SourceDetail { Remote = repoInfo}
             };
         }
 
@@ -53,11 +54,15 @@ namespace Microsoft.DocAsCode.Build.Common
             }
 
             var overriden = RemoveRequiredProperties(properties, RequiredProperties);
-            var repoInfo = GitUtility.GetGitDetail(filePath);
+            var repoInfo = GitUtility.TryGetFileDetail(filePath);
 
             return new OverwriteDocumentModel
             {
                 Uid = properties[Constants.PropertyName.Uid].ToString(),
+                LinkToFiles = new HashSet<string>(part.LinkToFiles),
+                LinkToUids = new HashSet<string>(part.LinkToUids),
+                FileLinkSources = part.FileLinkSources.ToDictionary(p => p.Key, p => p.Value.ToList()),
+                UidLinkSources = part.UidLinkSources.ToDictionary(p => p.Key, p => p.Value.ToList()),
                 Metadata = overriden,
                 Conceptual = part.Conceptual,
                 Documentation = new SourceDetail
@@ -91,8 +96,9 @@ namespace Microsoft.DocAsCode.Build.Common
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.Fail("Markup failed!");
-                Logger.LogWarning($"Markup failed:{Environment.NewLine}  Markdown: {markdown}{Environment.NewLine}  Details:{ex.ToString()}");
-                return Enumerable.Empty<YamlHtmlPart>();
+                var message = $"Markup failed: {ex.Message}.";
+                Logger.LogError(message);
+                throw new DocumentException(message, ex);
             }
         }
 

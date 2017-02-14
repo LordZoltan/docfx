@@ -88,7 +88,7 @@ by a blank line.</p>
 <p>Leave 2 spaces at the end of a line to do a<br>line break</p>
 <p>Text attributes <em>italic</em>, <strong>bold</strong>, 
 <code>monospace</code>, <del>strikethrough</del> .</p>
-<p>A <a href=""http://example.com"">link</a>.</p>
+<p>A <a href=""http://example.com"" data-raw-source=""[link](http://example.com)"">link</a>.</p>
 <p>Shopping list:</p>
 <ul>
 <li>apples</li>
@@ -107,11 +107,12 @@ by a blank line.</p>
     -   [B
         1](link3)
     -   [B'2](link4)", @"<ul>
-<li><a href=""link1"">A</a></li>
-<li><a href=""link2"">B</a><ul>
-<li><a href=""link3"">B
+<li><a href=""link1"" data-raw-source=""[A](link1)"">A</a></li>
+<li><a href=""link2"" data-raw-source=""[B](link2)"">B</a><ul>
+<li><a href=""link3"" data-raw-source=""[B
+1](link3)"">B
 1</a></li>
-<li><a href=""link4"">B&#39;2</a></li>
+<li><a href=""link4"" data-raw-source=""[B&#39;2](link4)"">B&#39;2</a></li>
 </ul>
 </li>
 </ul>
@@ -132,11 +133,13 @@ code
 <li>asdf</li>
 <li>sdfa</li>
 <li><p>adsf</p>
-<pre><code>- j
-- j
-
-    ![](a)
-</code></pre></li>
+<ul>
+<li>j</li>
+<li><p>j</p>
+<p>  <img src=""a"" alt=""""></p>
+</li>
+</ul>
+</li>
 </ol>
 ")]
         [InlineData(@"1. asdf
@@ -264,14 +267,14 @@ this should be same line with the above one</p>
 </li>
 </ul>
 ")]
-        [InlineData("[A] (link1)", @"<p><a href=""link1"">A</a></p>
+        [InlineData("[A] (link1)", @"<p><a href=""link1"" data-raw-source=""[A] (link1)"">A</a></p>
 ")]
         [InlineData(@"# Test Ref
 For more information about user navigation properties, see the documentation for [User].
 
 [User]: ./entity-and-complex-type-reference.md#UserEntity",
             @"<h1 id=""test-ref"">Test Ref</h1>
-<p>For more information about user navigation properties, see the documentation for <a href=""./entity-and-complex-type-reference.md#UserEntity"">User</a>.</p>
+<p>For more information about user navigation properties, see the documentation for <a href=""./entity-and-complex-type-reference.md#UserEntity"" data-raw-source=""[User]"">User</a>.</p>
 ")]
         [InlineData(@"> [abc][1]
 > > [1]
@@ -279,17 +282,17 @@ For more information about user navigation properties, see the documentation for
 
 [1]: 11111",
             @"<blockquote>
-<p><a href=""11111"">abc</a></p>
+<p><a href=""11111"" data-raw-source=""[abc][1]"">abc</a></p>
 <blockquote>
-<p><a href=""11111"">1</a></p>
+<p><a href=""11111"" data-raw-source=""[1]"">1</a></p>
 </blockquote>
 </blockquote>
 ")]
         [InlineData(@"[a](a(b).c)",
-            @"<p><a href=""a(b).c"">a</a></p>
+            @"<p><a href=""a(b).c"" data-raw-source=""[a](a(b).c)"">a</a></p>
 ")]
         [InlineData(@"[a](a(b(c)).d 'text')",
-            @"<p><a href=""a(b(c)).d"" title=""text"">a</a></p>
+            @"<p><a href=""a(b(c)).d"" title=""text"" data-raw-source=""[a](a(b(c)).d &#39;text&#39;)"">a</a></p>
 ")]
         [InlineData(@"__a__*b*__c__",
             @"<p><strong>a</strong><em>b</em><strong>c</strong></p>
@@ -442,18 +445,17 @@ aaa",
 ")]
         [InlineData(
             @"[a\\](b)",
-            @"<p><a href=""b"">a\</a></p>
+            @"<p><a href=""b"" data-raw-source=""[a\\](b)"">a\</a></p>
 ")]
         [InlineData(
             @"[a](b\\)",
-            @"<p><a href=""b\"">a</a></p>
+            @"<p><a href=""b\"" data-raw-source=""[a](b\\)"">a</a></p>
 ")]
         [InlineData(
             @"<!--a-->[b](c)<!--d-->e
 <!--f-->",
-            @"<p><!--a--><a href=""c"">b</a><!--d-->e
-<!--f--></p>
-")]
+            @"<p><!--a--><a href=""c"" data-raw-source=""[b](c)"">b</a><!--d-->e</p>
+<!--f-->")]
         [InlineData(
             @"aabbcc:smile:ddee",
             @"<p>aabbcc<span class=""emoji"" shortCode=""smile"">😄</span>ddee</p>
@@ -506,6 +508,71 @@ aaa",
             @"<h1 id=""测试用例"">测试。用例</h1>
 <h1 id=""测试用例-1"">测试。用例</h1>
 ")]
+        [InlineData(
+            @"**this is bold and *italic** *",
+            @"<p><strong>this is bold and *italic</strong> *</p>
+")]
+        [InlineData(
+            @"**aaa*aa **aaa a *a aaa **",
+            @"<p><em>*aaa</em>aa **aaa a *a aaa **</p>
+")]
+        [InlineData(
+            @"__aaa_aa __aaa a _a aaa __a",
+            @"<p>__aaa_aa __aaa a _a aaa __a</p>
+")]
+        [InlineData(
+            @"***A*B*C*D**",
+            @"<p><strong><em>A</em>B<em>C</em>D</strong></p>
+")]
+        [InlineData(
+            @"* [a]: a
+
+* [b]: b
+
+  [c]: c",
+            @"<ul>
+<li><p>[a]: a</p>
+</li>
+<li><p>[b]: b</p>
+</li>
+</ul>
+")]
+        [InlineData(
+            @"* [a][a] (b)
+
+[a]: http://a.b/c",
+            @"<ul>
+<li><a href=""http://a.b/c"" data-raw-source=""[a][a]"">a</a> (b)</li>
+</ul>
+")]
+        [InlineData(
+            @"[https://github.com/dotnet/docfx/](https://github.com/dotnet/docfx/)",
+            @"<p><a href=""https://github.com/dotnet/docfx/"" data-raw-source=""[https://github.com/dotnet/docfx/](https://github.com/dotnet/docfx/)"">https://github.com/dotnet/docfx/</a></p>
+")]
+        [InlineData(
+            @"[![](myimage.png)Some description](targetfile.md)",
+            @"<p><a href=""targetfile.md"" data-raw-source=""[![](myimage.png)Some description](targetfile.md)""><img src=""myimage.png"" alt="""">Some description</a></p>
+")]
+        [InlineData(
+            @"[![](myimage.png)Some description][a]
+
+[a]: targetfile.md",
+            @"<p><a href=""targetfile.md"" data-raw-source=""[![](myimage.png)Some description][a]""><img src=""myimage.png"" alt="""">Some description</a></p>
+")]
+        [InlineData(
+            @"[![b]Some description][a]
+
+[a]: targetfile.md
+[b]: myimage.png",
+            @"<p><a href=""targetfile.md"" data-raw-source=""[![b]Some description][a]""><img src=""myimage.png"" alt=""b"">Some description</a></p>
+")]
+        [InlineData(
+            @"[![image][b]Some description][a]
+
+[a]: targetfile.md
+[b]: myimage.png",
+            @"<p><a href=""targetfile.md"" data-raw-source=""[![image][b]Some description][a]""><img src=""myimage.png"" alt=""image"">Some description</a></p>
+")]
         #endregion
         public void TestGfmInGeneral(string source, string expected)
         {
@@ -513,6 +580,47 @@ aaa",
             var engine = builder.CreateEngine(new HtmlRenderer());
             var result = engine.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "Markdown")]
+        public void TestTable_WithEmptyColumn()
+        {
+            // 1. Prepare data
+            var source = @"|   | Empty column  | Right Aligned |
+|:------------ |:---------------:|-----:|
+|       | some wordy text | $1600 |
+|       | centered        |   $12 |
+|   | are neat        |    $1 |";
+
+            var expected = @"<table>
+<thead>
+<tr>
+<th style=""text-align:left""></th>
+<th style=""text-align:center"">Empty column</th>
+<th style=""text-align:right"">Right Aligned</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style=""text-align:left""></td>
+<td style=""text-align:center"">some wordy text</td>
+<td style=""text-align:right"">$1600</td>
+</tr>
+<tr>
+<td style=""text-align:left""></td>
+<td style=""text-align:center"">centered</td>
+<td style=""text-align:right"">$12</td>
+</tr>
+<tr>
+<td style=""text-align:left""></td>
+<td style=""text-align:center"">are neat</td>
+<td style=""text-align:right"">$1</td>
+</tr>
+</tbody>
+</table>
+";
+            TestGfmInGeneral(source, expected);
         }
 
         [Fact]
@@ -658,7 +766,7 @@ https://en.wikipedia.org/wiki/Draft:Microsoft_SQL_Server_Libraries/Drivers
 <tbody>
 <tr>
 <td style=""text-align:left""><em>1-1</em></td>
-<td style=""text-align:center""><a href=""./entity-and-complex-type-reference.md#UserEntity"">User</a></td>
+<td style=""text-align:center""><a href=""./entity-and-complex-type-reference.md#UserEntity"" data-raw-source=""[User]"">User</a></td>
 <td style=""text-align:right"">test</td>
 </tr>
 </tbody>
@@ -684,7 +792,7 @@ https://en.wikipedia.org/wiki/Draft:Microsoft_SQL_Server_Libraries/Drivers
         {
             var source = @"[This is link text with quotation ' and double quotation ""hello"" world](girl.png ""title is ""hello"" world."")";
 
-            var expected = @"<p><a href=""girl.png"" title=""title is &quot;hello&quot; world."">This is link text with quotation &#39; and double quotation &quot;hello&quot; world</a></p>
+            var expected = @"<p><a href=""girl.png"" title=""title is &quot;hello&quot; world."" data-raw-source=""[This is link text with quotation &#39; and double quotation &quot;hello&quot; world](girl.png &quot;title is &quot;hello&quot; world.&quot;)"">This is link text with quotation &#39; and double quotation &quot;hello&quot; world</a></p>
 ";
             TestGfmInGeneral(source, expected);
         }

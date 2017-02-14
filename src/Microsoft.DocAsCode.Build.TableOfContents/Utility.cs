@@ -8,7 +8,6 @@ namespace Microsoft.DocAsCode.Build.TableOfContents
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
-    using Microsoft.DocAsCode.Utility;
     using Microsoft.DocAsCode.Plugins;
 
     internal static class Utility
@@ -45,7 +44,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents
             {
                 if (fileType == TocFileType.Markdown)
                 {
-                    return MarkdownTocReader.LoadToc(File.ReadAllText(file), file);
+                    return MarkdownTocReader.LoadToc(EnvironmentContext.FileAbstractLayer.ReadAllText(file), file);
                 }
                 else if (fileType == TocFileType.Yaml)
                 {

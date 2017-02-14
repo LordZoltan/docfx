@@ -5,20 +5,21 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
 {
     using System;
     using System.Collections.Generic;
+    using System.IO;
     using System.Linq;
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
+
 
     public sealed class BuildMessageInfo
     {
         private Listener _listener;
-        private readonly Dictionary<string, List<LogItem>> _logs;
+        private readonly OSPlatformSensitiveDictionary<List<LogItem>> _logs;
 
         public BuildMessageInfo()
         {
-            _logs = new Dictionary<string, List<LogItem>>();
+            _logs = new OSPlatformSensitiveDictionary<List<LogItem>>();
         }
 
         private BuildMessageInfo(IDictionary<string, List<LogItem>> logs)
@@ -27,7 +28,7 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
             {
                 throw new ArgumentNullException(nameof(logs));
             }
-            _logs = new Dictionary<string, List<LogItem>>(logs);
+            _logs = new OSPlatformSensitiveDictionary<List<LogItem>>(logs);
         }
 
         /// <summary>
@@ -76,7 +77,7 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
             {
                 return;
             }
-            string fileFromWorkingDir = item.File;
+            string fileFromWorkingDir = StringExtension.BackSlashToForwardSlash(item.File);
             if (!PathUtility.IsRelativePath(item.File))
             {
                 fileFromWorkingDir = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, item.File);
@@ -88,7 +89,7 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
             }
             logsPerFile.Add(new LogItem
             {
-                File = item.File,
+                File = StringExtension.BackSlashToForwardSlash(item.File),
                 Line = item.Line,
                 LogLevel = item.LogLevel,
                 Message = item.Message,
@@ -96,15 +97,15 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
             });
         }
 
-        public static BuildMessageInfo Load(string file)
+        public static BuildMessageInfo Load(TextReader reader)
         {
-            var logs = IncrementalUtility.LoadIntermediateFile<IDictionary<string, List<LogItem>>>(file);
+            var logs = JsonUtility.Deserialize<IDictionary<string, List<LogItem>>>(reader);
             return new BuildMessageInfo(logs);
         }
 
-        public void Save(string file)
+        public void Save(TextWriter writer)
         {
-            IncrementalUtility.SaveIntermediateFile<IDictionary<string, List<LogItem>>>(file, _logs);
+            JsonUtility.Serialize(writer, _logs);
         }
 
         private sealed class Listener : ILoggerListener
@@ -137,6 +138,7 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
             }
         }
 
+        [Serializable]
         private sealed class LogItem : ILogItem
         {
             public string File { get; set; }

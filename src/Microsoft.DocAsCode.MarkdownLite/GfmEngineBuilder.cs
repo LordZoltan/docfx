@@ -35,7 +35,6 @@ namespace Microsoft.DocAsCode.MarkdownLite
             builder.Add(new MarkdownHtmlBlockRule());
             builder.Add(new MarkdownDefBlockRule());
             builder.Add(new MarkdownTableBlockRule());
-            builder.Add(new GfmParagraphBlockRule());
             builder.Add(new MarkdownTextBlockRule());
             BlockRules = builder.ToImmutable();
         }
@@ -47,7 +46,7 @@ namespace Microsoft.DocAsCode.MarkdownLite
             builder.Add(new MarkdownCommentInlineRule());
             builder.Add(new MarkdownAutoLinkInlineRule());
             builder.Add(new GfmUrlInlineRule());
-            builder.Add(new MarkdownCodeElementInlineRule());
+            builder.Add(new MarkdownPreElementInlineRule());
             builder.Add(new MarkdownTagInlineRule());
             builder.Add(new MarkdownLinkInlineRule());
             builder.Add(new MarkdownRefLinkInlineRule());

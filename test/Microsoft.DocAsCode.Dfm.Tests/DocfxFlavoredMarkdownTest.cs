@@ -21,11 +21,12 @@ namespace Microsoft.DocAsCode.Dfm.Tests
     {
         [Theory]
         [Trait("Related", "DfmMarkdown")]
+        #region Inline Data
         [InlineData("", "")]
-        [InlineData("<address@example.com>", "<p><a href=\"mailto:address@example.com\">address@example.com</a></p>\n")]
-        [InlineData(" https://github.com/dotnet/docfx/releases ", "<p> <a href=\"https://github.com/dotnet/docfx/releases\">https://github.com/dotnet/docfx/releases</a> </p>\n")]
+        [InlineData("<address@example.com>", "<p><a href=\"mailto:address@example.com\" data-raw-source=\"&lt;address@example.com&gt;\">address@example.com</a></p>\n")]
+        [InlineData(" https://github.com/dotnet/docfx/releases ", "<p> <a href=\"https://github.com/dotnet/docfx/releases\" data-raw-source=\"https://github.com/dotnet/docfx/releases\">https://github.com/dotnet/docfx/releases</a> </p>\n")]
         [InlineData(@"<Insert OneGet Details - meeting on 10/30 for details.>", @"<Insert OneGet Details - meeting on 10/30 for details.>")]
-        [InlineData("<http://example.com/>", "<p><a href=\"http://example.com/\">http://example.com/</a></p>\n")]
+        [InlineData("<http://example.com/>", "<p><a href=\"http://example.com/\" data-raw-source=\"&lt;http://example.com/&gt;\">http://example.com/</a></p>\n")]
         [InlineData("# Hello World", "<h1 id=\"hello-world\">Hello World</h1>\n")]
         [InlineData("Hot keys: <kbd>Ctrl+[</kbd> and <kbd>Ctrl+]</kbd>", "<p>Hot keys: <kbd>Ctrl+[</kbd> and <kbd>Ctrl+]</kbd></p>\n")]
         [InlineData("<div>Some text here</div>", "<div>Some text here</div>")]
@@ -36,7 +37,7 @@ b:
 ---", "<yamlheader start=\"1\" end=\"5\">a: b\nb:\n  c: e</yamlheader>")]
         [InlineData(@"# Hello @CrossLink1 @'CrossLink2'dummy 
 @World",
-            "<h1 id=\"hello-crosslink1-crosslink2dummy\">Hello <xref href=\"CrossLink1\" data-throw-if-not-resolved=\"False\" data-raw=\"@CrossLink1\"></xref> <xref href=\"CrossLink2\" data-throw-if-not-resolved=\"False\" data-raw=\"@&#39;CrossLink2&#39;\"></xref>dummy</h1>\n<p><xref href=\"World\" data-throw-if-not-resolved=\"False\" data-raw=\"@World\"></xref></p>\n")]
+            "<h1 id=\"hello-crosslink1-crosslink2dummy\">Hello <xref href=\"CrossLink1\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@CrossLink1\"></xref> <xref href=\"CrossLink2\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@&#39;CrossLink2&#39;\"></xref>dummy</h1>\n<p><xref href=\"World\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@World\"></xref></p>\n")]
         [InlineData("a\n```\nc\n```",
             "<p>a</p>\n<pre><code>c\n</code></pre>")]
         [InlineData(@"* Unordered list item 1
@@ -45,16 +46,17 @@ b:
 -------------------------------------
 ", "<ul>\n<li>Unordered list item 1</li>\n<li>Unordered list item 2</li>\n</ul>\n<h2 id=\"1-this-is-heading-not-ordered-list\">1. This Is Heading, Not Ordered List</h2>\n")]
         [InlineData(@" *hello* abc @api__1",
-            "<p> <em>hello</em> abc <xref href=\"api__1\" data-throw-if-not-resolved=\"False\" data-raw=\"@api__1\"></xref></p>\n")]
+            "<p> <em>hello</em> abc <xref href=\"api__1\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api__1\"></xref></p>\n")]
         [InlineData("@1abc", "<p>@1abc</p>\n")]
         [InlineData(@"@api1 @api__1 @api!1 @api@a abc@api.com a.b.c@api.com @'a p ';@""a!pi"",@api...@api",
-            "<p><xref href=\"api1\" data-throw-if-not-resolved=\"False\" data-raw=\"@api1\"></xref> <xref href=\"api__1\" data-throw-if-not-resolved=\"False\" data-raw=\"@api__1\"></xref> <xref href=\"api!1\" data-throw-if-not-resolved=\"False\" data-raw=\"@api!1\"></xref> <xref href=\"api@a\" data-throw-if-not-resolved=\"False\" data-raw=\"@api@a\"></xref> abc@api.com a.b.c@api.com <xref href=\"a p \" data-throw-if-not-resolved=\"False\" data-raw=\"@&#39;a p &#39;\"></xref>;<xref href=\"a!pi\" data-throw-if-not-resolved=\"False\" data-raw=\"@&quot;a!pi&quot;\"></xref>,<xref href=\"api\" data-throw-if-not-resolved=\"False\" data-raw=\"@api\"></xref>...<xref href=\"api\" data-throw-if-not-resolved=\"False\" data-raw=\"@api\"></xref></p>\n")]
-        [InlineData("[name](xref:uid \"title\")", "<p><a href=\"xref:uid\" title=\"title\">name</a></p>\n")]
-        [InlineData("<xref:uid>text", "<p><xref href=\"uid\" data-throw-if-not-resolved=\"True\" data-raw=\"&lt;xref:uid&gt;\"></xref>text</p>\n")]
-        [InlineData("<xref:'uid with space'>text", "<p><xref href=\"uid with space\" data-throw-if-not-resolved=\"True\" data-raw=\"&lt;xref:&#39;uid with space&#39;&gt;\"></xref>text</p>\n")]
+            "<p><xref href=\"api1\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api1\"></xref> <xref href=\"api__1\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api__1\"></xref> <xref href=\"api!1\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api!1\"></xref> <xref href=\"api@a\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api@a\"></xref> abc@api.com a.b.c@api.com <xref href=\"a p \" data-throw-if-not-resolved=\"False\" data-raw-source=\"@&#39;a p &#39;\"></xref>;<xref href=\"a!pi\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@&quot;a!pi&quot;\"></xref>,<xref href=\"api\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api\"></xref>...<xref href=\"api\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@api\"></xref></p>\n")]
+        [InlineData("[name](xref:uid \"title\")", "<p><a href=\"xref:uid\" title=\"title\" data-raw-source=\"[name](xref:uid &quot;title&quot;)\">name</a></p>\n")]
+        [InlineData("<xref:uid>text", "<p><xref href=\"uid\" data-throw-if-not-resolved=\"True\" data-raw-source=\"&lt;xref:uid&gt;\"></xref>text</p>\n")]
+        [InlineData("<xref:'uid with space'>text", "<p><xref href=\"uid with space\" data-throw-if-not-resolved=\"True\" data-raw-source=\"&lt;xref:&#39;uid with space&#39;&gt;\"></xref>text</p>\n")]
         [InlineData(
             @"[*a*](xref:uid)",
-            "<p><a href=\"xref:uid\"><em>a</em></a></p>\n")]
+            "<p><a href=\"xref:uid\" data-raw-source=\"[*a*](xref:uid)\"><em>a</em></a></p>\n")]
+        #endregion
         public void TestDfmInGeneral(string source, string expected)
         {
             Assert.Equal(expected.Replace("\r\n", "\n"), DocfxFlavoredMarked.Markup(source));
@@ -90,9 +92,9 @@ b:
             var linkAndRefRoot = @"
 Paragraph1
 [link](a.md)
-[!include[link2](../link/link2.md)]
+[!include-[link2](../link/link2.md)]
 ![Image](img/img.jpg)
-[!include[root](../root.md)]";
+[!include-[root](../root.md)]";
             var link2 = @"[link](md/c.md)";
             var refc = @"[!include[c](../c/c.md ""This is root"")]";
             var c = @"**Hello**";
@@ -106,10 +108,10 @@ Paragraph1
             var dependency = new HashSet<string>();
             var marked = DocfxFlavoredMarked.Markup(root, "r/root.md", dependency: dependency);
             Assert.Equal(@"<!-- BEGIN INCLUDE: Include content from &quot;r/b/linkAndRefRoot.md&quot; --><p>Paragraph1
-<a href=""~/r/b/a.md"">link</a>
-<!-- BEGIN INCLUDE: Include content from &quot;r/link/link2.md&quot; --><a href=""~/r/link/md/c.md"">link</a><!--END INCLUDE -->
+<a href=""~/r/b/a.md"" data-raw-source=""[link](a.md)"">link</a>
+<!-- BEGIN INCLUDE: Include content from &quot;r/link/link2.md&quot; --><a href=""~/r/link/md/c.md"" data-raw-source=""[link](md/c.md)"">link</a><!--END INCLUDE -->
 <img src=""~/r/b/img/img.jpg"" alt=""Image"">
-<!-- BEGIN ERROR INCLUDE: Unable to resolve [!include[root](../root.md)]: Circular dependency found in &quot;r/b/linkAndRefRoot.md&quot; -->[!include[root](../root.md)]<!--END ERROR INCLUDE --></p>
+<!-- BEGIN ERROR INCLUDE: Unable to resolve [!include-[root](../root.md)]: Circular dependency found in &quot;r/b/linkAndRefRoot.md&quot; -->[!include-[root](../root.md)]<!--END ERROR INCLUDE --></p>
 <!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/a/refc.md&quot; --><!-- BEGIN INCLUDE: Include content from &quot;r/c/c.md&quot; --><p><strong>Hello</strong></p>
 <!--END INCLUDE --><!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/a/refc.md&quot; --><!-- BEGIN INCLUDE: Include content from &quot;r/c/c.md&quot; --><p><strong>Hello</strong></p>
 <!--END INCLUDE --><!--END INCLUDE --><!-- BEGIN INCLUDE: Include content from &quot;r/empty.md&quot; --><!--END INCLUDE --><!-- BEGIN ERROR INCLUDE: Absolute path &quot;http://microsoft.com/a.md&quot; is not supported. -->[!include[external](http://microsoft.com/a.md)]<!--END ERROR INCLUDE -->".Replace("\r\n", "\n"), marked);
@@ -124,6 +126,23 @@ Paragraph1
                     "root.md",
                 },
                 dependency.OrderBy(x => x));
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestBlockLevelInclusionWithWorkingFolder()
+        {
+            // -r
+            //  |- root.md
+            //  |- b
+            //  |  |- linkAndRefRoot.md
+            var root = @"[!include[linkAndRefRoot](~/r/b/linkAndRefRoot.md)]";
+            var linkAndRefRoot = @"Paragraph1";
+            WriteToFile("r/root.md", root);
+            WriteToFile("r/b/linkAndRefRoot.md", linkAndRefRoot);
+            var marked = DocfxFlavoredMarked.Markup(root, "r/root.md");
+            Assert.Equal(@"<!-- BEGIN INCLUDE: Include content from &quot;~/r/b/linkAndRefRoot.md&quot; --><p>Paragraph1</p>
+<!--END INCLUDE -->".Replace("\r\n", "\n"), marked);
         }
 
         [Fact]
@@ -163,10 +182,10 @@ Paragraph1
             var dependency = new HashSet<string>();
             var marked = DocfxFlavoredMarked.Markup(a, "r/a/a.md", dependency: dependency);
             var expected = @"<!-- BEGIN INCLUDE: Include content from &quot;r/b/token.md&quot; --><p><img src=""~/r/img/img.jpg"" alt="""">
-<a href=""#anchor""></a>
-<a href=""~/r/a/a.md"">a</a>
-<a href=""~/r/b/invalid.md""></a>
-<a href=""~/r/c/d/d.md#anchor"">d</a></p>
+<a href=""#anchor"" data-raw-source=""[](#anchor)""></a>
+<a href=""~/r/a/a.md"" data-raw-source=""[a](../a/a.md)"">a</a>
+<a href=""~/r/b/invalid.md"" data-raw-source=""[](invalid.md)""></a>
+<a href=""~/r/c/d/d.md#anchor"" data-raw-source=""[d](../c/d/d.md#anchor)"">d</a></p>
 <!--END INCLUDE -->".Replace("\r\n", "\n");
             Assert.Equal(expected, marked);
             Assert.Equal(
@@ -227,7 +246,7 @@ Inline [!include[ref3](ref3.md ""This is root"")]
 [!INCLUDE [azure-ps-prerequisites-include.md](inc3.md)]";
 
             var expected = @"<p><!-- BEGIN INCLUDE: Include content from &quot;inc1.md&quot; -->inc1<!--END INCLUDE -->.</p>
-<p><!-- BEGIN INCLUDE: Include content from &quot;inc2.md&quot; -->inc2<!--END INCLUDE --> <a href=""inc1.md"">Resource Manager model</a>.</p>
+<p><!-- BEGIN INCLUDE: Include content from &quot;inc2.md&quot; -->inc2<!--END INCLUDE --> <a href=""inc1.md"" data-raw-source=""[Resource Manager model](inc1.md)"">Resource Manager model</a>.</p>
 <!-- BEGIN INCLUDE: Include content from &quot;inc3.md&quot; --><p>inc3</p>
 <!--END INCLUDE -->";
 
@@ -257,7 +276,7 @@ Inline [!include[ref3](ref3.md ""This is root"")]
 ";
 
             var expected = @"<p>The following is video.</p>
-<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+<div class=""embeddedvideo""><iframe src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe></div>
 ";
 
             var marked = DocfxFlavoredMarked.Markup(root);
@@ -274,8 +293,8 @@ Inline [!include[ref3](ref3.md ""This is root"")]
 > [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]";
 
             var expected = @"<p>The following is two videos.</p>
-<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
-<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+<div class=""embeddedvideo""><iframe src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe></div>
+<div class=""embeddedvideo""><iframe src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe></div>
 ";
 
             var marked = DocfxFlavoredMarked.Markup(root);
@@ -294,10 +313,10 @@ Inline [!include[ref3](ref3.md ""This is root"")]
 > [!Video https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4]";
 
             var expected = @"<p>The following is video mixed with note.</p>
-<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+<div class=""embeddedvideo""><iframe src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe></div>
 <div class=""NOTE""><h5>NOTE</h5><p>this is note text</p>
 </div>
-<iframe width=""640"" height=""320"" src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe>
+<div class=""embeddedvideo""><iframe src=""https://sec.ch9.ms/ch9/4393/7d7c7df7-3f15-4a65-a2f7-3e4d0bea4393/Episode208_mid.mp4"" frameborder=""0"" allowfullscreen=""true""></iframe></div>
 ";
 
             var marked = DocfxFlavoredMarked.Markup(root);
@@ -450,6 +469,7 @@ world</p>
 
         [Theory]
         [Trait("Related", "DfmMarkdown")]
+        #region Inline Data
         [InlineData(@"the following is note type
   > [!NOTE]
   > note text 1-1
@@ -490,6 +510,7 @@ This is also note<br/>This is also note with br</p>
 </div>
 ")]
         [InlineData(@"the following is code
+
     > code text 1-1
     > [!NOTE]
     > code text 1-2  
@@ -500,6 +521,7 @@ This is also note<br/>This is also note with br</p>
 &gt; code text 1-2  
 &gt; code text 2-1
 </code></pre>")]
+        #endregion
         public void TestSectionNoteInBlockQuote(string source, string expected)
         {
             var markedContent = DocfxFlavoredMarked.Markup(source);
@@ -618,14 +640,14 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
 > 
 ";
             var expected = @"<div class=""op_single_selector""><ul>
-<li><a href=""../articles/notification-hubs-windows-store-dotnet-get-started/.md"">Universal Windows</a></li>
-<li><a href=""../articles/notification-hubs-windows-phone-get-started/.md"">Windows Phone</a></li>
-<li><a href=""../articles/notification-hubs-ios-get-started/.md"">iOS</a></li>
-<li><a href=""../articles/notification-hubs-android-get-started/.md"">Android</a></li>
-<li><a href=""../articles/notification-hubs-kindle-get-started/.md"">Kindle</a></li>
-<li><a href=""../articles/notification-hubs-baidu-get-started/.md"">Baidu</a></li>
-<li><a href=""../articles/partner-xamarin-notification-hubs-ios-get-started/.md"">Xamarin.iOS</a></li>
-<li><a href=""../articles/partner-xamarin-notification-hubs-android-get-started/.md"">Xamarin.Android</a></li>
+<li><a href=""../articles/notification-hubs-windows-store-dotnet-get-started/.md"" data-raw-source=""[Universal Windows](../articles/notification-hubs-windows-store-dotnet-get-started/.md)"">Universal Windows</a></li>
+<li><a href=""../articles/notification-hubs-windows-phone-get-started/.md"" data-raw-source=""[Windows Phone](../articles/notification-hubs-windows-phone-get-started/.md)"">Windows Phone</a></li>
+<li><a href=""../articles/notification-hubs-ios-get-started/.md"" data-raw-source=""[iOS](../articles/notification-hubs-ios-get-started/.md)"">iOS</a></li>
+<li><a href=""../articles/notification-hubs-android-get-started/.md"" data-raw-source=""[Android](../articles/notification-hubs-android-get-started/.md)"">Android</a></li>
+<li><a href=""../articles/notification-hubs-kindle-get-started/.md"" data-raw-source=""[Kindle](../articles/notification-hubs-kindle-get-started/.md)"">Kindle</a></li>
+<li><a href=""../articles/notification-hubs-baidu-get-started/.md"" data-raw-source=""[Baidu](../articles/notification-hubs-baidu-get-started/.md)"">Baidu</a></li>
+<li><a href=""../articles/partner-xamarin-notification-hubs-ios-get-started/.md"" data-raw-source=""[Xamarin.iOS](../articles/partner-xamarin-notification-hubs-ios-get-started/.md)"">Xamarin.iOS</a></li>
+<li><a href=""../articles/partner-xamarin-notification-hubs-android-get-started/.md"" data-raw-source=""[Xamarin.Android](../articles/partner-xamarin-notification-hubs-android-get-started/.md)"">Xamarin.Android</a></li>
 </ul>
 </div>
 ";
@@ -652,16 +674,16 @@ outlookClient.me.events.getEvents().fetch().then(function(result) {
 > 
 ";
             var expected = @"<div class=""op_multi_selector"" title1=""Platform"" title2=""Backend""><ul>
-<li><a href=""./mobile-services-dotnet-backend-ios-get-started-push.md"">(iOS | .NET)</a></li>
-<li><a href=""./mobile-services-javascript-backend-ios-get-started-push.md"">(iOS | JavaScript)</a></li>
-<li><a href=""./mobile-services-dotnet-backend-windows-universal-dotnet-get-started-push.md"">(Windows universal C# | .NET)</a></li>
-<li><a href=""./mobile-services-javascript-backend-windows-universal-dotnet-get-started-push.md"">(Windows universal C# | Javascript)</a></li>
-<li><a href=""./mobile-services-dotnet-backend-windows-phone-get-started-push.md"">(Windows Phone | .NET)</a></li>
-<li><a href=""./mobile-services-javascript-backend-windows-phone-get-started-push.md"">(Windows Phone | Javascript)</a></li>
-<li><a href=""./mobile-services-dotnet-backend-android-get-started-push.md"">(Android | .NET)</a></li>
-<li><a href=""./mobile-services-javascript-backend-android-get-started-push.md"">(Android | Javascript)</a></li>
-<li><a href=""./partner-xamarin-mobile-services-ios-get-started-push.md"">(Xamarin iOS | Javascript)</a></li>
-<li><a href=""./partner-xamarin-mobile-services-android-get-started-push.md"">(Xamarin Android | Javascript)</a></li>
+<li><a href=""./mobile-services-dotnet-backend-ios-get-started-push.md"" data-raw-source=""[(iOS | .NET)](./mobile-services-dotnet-backend-ios-get-started-push.md)"">(iOS | .NET)</a></li>
+<li><a href=""./mobile-services-javascript-backend-ios-get-started-push.md"" data-raw-source=""[(iOS | JavaScript)](./mobile-services-javascript-backend-ios-get-started-push.md)"">(iOS | JavaScript)</a></li>
+<li><a href=""./mobile-services-dotnet-backend-windows-universal-dotnet-get-started-push.md"" data-raw-source=""[(Windows universal C# | .NET)](./mobile-services-dotnet-backend-windows-universal-dotnet-get-started-push.md)"">(Windows universal C# | .NET)</a></li>
+<li><a href=""./mobile-services-javascript-backend-windows-universal-dotnet-get-started-push.md"" data-raw-source=""[(Windows universal C# | Javascript)](./mobile-services-javascript-backend-windows-universal-dotnet-get-started-push.md)"">(Windows universal C# | Javascript)</a></li>
+<li><a href=""./mobile-services-dotnet-backend-windows-phone-get-started-push.md"" data-raw-source=""[(Windows Phone | .NET)](./mobile-services-dotnet-backend-windows-phone-get-started-push.md)"">(Windows Phone | .NET)</a></li>
+<li><a href=""./mobile-services-javascript-backend-windows-phone-get-started-push.md"" data-raw-source=""[(Windows Phone | Javascript)](./mobile-services-javascript-backend-windows-phone-get-started-push.md)"">(Windows Phone | Javascript)</a></li>
+<li><a href=""./mobile-services-dotnet-backend-android-get-started-push.md"" data-raw-source=""[(Android | .NET)](./mobile-services-dotnet-backend-android-get-started-push.md)"">(Android | .NET)</a></li>
+<li><a href=""./mobile-services-javascript-backend-android-get-started-push.md"" data-raw-source=""[(Android | Javascript)](./mobile-services-javascript-backend-android-get-started-push.md)"">(Android | Javascript)</a></li>
+<li><a href=""./partner-xamarin-mobile-services-ios-get-started-push.md"" data-raw-source=""[(Xamarin iOS | Javascript)](./partner-xamarin-mobile-services-ios-get-started-push.md)"">(Xamarin iOS | Javascript)</a></li>
+<li><a href=""./partner-xamarin-mobile-services-android-get-started-push.md"" data-raw-source=""[(Xamarin Android | Javascript)](./partner-xamarin-mobile-services-android-get-started-push.md)"">(Xamarin Android | Javascript)</a></li>
 </ul>
 </div>
 ";
@@ -701,7 +723,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
         public void TestDfmLink_LinkWithSpecialCharactorsInTitle()
         {
             var source = @"[text's string](https://www.google.com.sg/?gfe_rd=cr&ei=Xk ""Google's homepage"")";
-            var expected = @"<p><a href=""https://www.google.com.sg/?gfe_rd=cr&amp;ei=Xk"" title=""Google&#39;s homepage"">text&#39;s string</a></p>
+            var expected = @"<p><a href=""https://www.google.com.sg/?gfe_rd=cr&amp;ei=Xk"" title=""Google&#39;s homepage"" data-raw-source=""[text&#39;s string](https://www.google.com.sg/?gfe_rd=cr&amp;ei=Xk &quot;Google&#39;s homepage&quot;)"">text&#39;s string</a></p>
 ";
             var marked = DocfxFlavoredMarked.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), marked);
@@ -713,7 +735,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
         {
             var source = @"[This is link text with quotation ' and double quotation ""hello"" world](girl.png ""title is ""hello"" world."")";
 
-            var expected = @"<p><a href=""girl.png"" title=""title is &quot;hello&quot; world."">This is link text with quotation &#39; and double quotation &quot;hello&quot; world</a></p>
+            var expected = @"<p><a href=""girl.png"" title=""title is &quot;hello&quot; world."" data-raw-source=""[This is link text with quotation &#39; and double quotation &quot;hello&quot; world](girl.png &quot;title is &quot;hello&quot; world.&quot;)"">This is link text with quotation &#39; and double quotation &quot;hello&quot; world</a></p>
 ";
             var marked = DocfxFlavoredMarked.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), marked);
@@ -724,7 +746,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
         public void TestPathUtility_AbsoluteLinkWithBracketAndBrackt()
         {
             var source = @"[User-Defined Date/Time Formats (Format Function)](http://msdn2.microsoft.com/library/73ctwf33\(VS.90\).aspx)";
-            var expected = @"<p><a href=""http://msdn2.microsoft.com/library/73ctwf33(VS.90).aspx"">User-Defined Date/Time Formats (Format Function)</a></p>
+            var expected = @"<p><a href=""http://msdn2.microsoft.com/library/73ctwf33(VS.90).aspx"" data-raw-source=""[User-Defined Date/Time Formats (Format Function)](http://msdn2.microsoft.com/library/73ctwf33\(VS.90\).aspx)"">User-Defined Date/Time Formats (Format Function)</a></p>
 ";
             var marked = DocfxFlavoredMarked.Markup(source);
             Assert.Equal(expected.Replace("\r\n", "\n"), marked);
@@ -762,7 +784,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
                 },
                 new MarkdownTagValidationRule
                 {
-                    TagNames = new List<string> { "code" },
+                    TagNames = new List<string> { "pre" },
                     MessageFormatter = "Warning tag({0})!",
                     Behavior = TagValidationBehavior.Warning,
                 },
@@ -782,12 +804,12 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
             string result;
             using (new LoggerPhaseScope("test!!!!"))
             {
-                result = engine.Markup(@"<div><i>x</i><EM>y</EM><h1>z<code>a*b*c</code></h1></div>
+                result = engine.Markup(@"<div><i>x</i><EM>y</EM><h1>z<pre><code>a*b*c</code></pre></h1></div>
 
 <script>alert(1);</script>", "test");
             }
             Logger.UnregisterListener(listener);
-            Assert.Equal(@"<div><i>x</i><EM>y</EM><h1>z<code>a*b*c</code></h1></div>
+            Assert.Equal(@"<div><i>x</i><EM>y</EM><h1>z<pre><code>a*b*c</code></pre></h1></div>
 
 <script>alert(1);</script>".Replace("\r\n", "\n"), result);
             Assert.Equal(8, listener.Items.Count);
@@ -797,7 +819,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
                 "Invalid tag(div)!",
                 "Invalid tag(EM)!",
                 "Warning tag(h1)!",
-                "Warning tag(code)!",
+                "Warning tag(pre)!",
                 "Warning tag(h1)!",
                 "Html Tag!",
                 "Warning tag(script)!",
@@ -862,9 +884,126 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
                 dependency.OrderBy(x => x));
         }
 
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmFencesInlineLevel()
+        {
+            var root = @"
+| Code in table | Header1 |
+ ----------------- | ----------------------------
+| [!code-FakeREST[REST](api.json)] | [!Code-FakeREST-i[REST-i](api.json ""This is root"")]
+| [!CODE[No Language](api.json)] | [!code-js[empty](api.json)]
+";
+
+            var apiJsonContent = @"
+{
+   ""method"": ""GET"",
+   ""resourceFormat"": ""https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End"",
+   ""requestUrl"": ""https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End"",
+   ""requestHeaders"": {
+                ""Accept"": ""application/json""
+   }
+}";
+            File.WriteAllText("api.json", apiJsonContent.Replace("\r\n", "\n"));
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "api.json", dependency: dependency);
+            const string expected = @"<table>
+<thead>
+<tr>
+<th>Code in table</th>
+<th>Header1</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><pre><code class=""lang-FakeREST"" name=""REST"">
+{
+   &quot;method&quot;: &quot;GET&quot;,
+   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestHeaders&quot;: {
+                &quot;Accept&quot;: &quot;application/json&quot;
+   }
+}
+</code></pre></td>
+<td><pre><code class=""lang-FakeREST-i"" name=""REST-i"" title=""This is root"">
+{
+   &quot;method&quot;: &quot;GET&quot;,
+   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestHeaders&quot;: {
+                &quot;Accept&quot;: &quot;application/json&quot;
+   }
+}
+</code></pre></td>
+</tr>
+<tr>
+<td><pre><code name=""No Language"">
+{
+   &quot;method&quot;: &quot;GET&quot;,
+   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestHeaders&quot;: {
+                &quot;Accept&quot;: &quot;application/json&quot;
+   }
+}
+</code></pre></td>
+<td><pre><code class=""lang-js"" name=""empty"">
+{
+   &quot;method&quot;: &quot;GET&quot;,
+   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestHeaders&quot;: {
+                &quot;Accept&quot;: &quot;application/json&quot;
+   }
+}
+</code></pre></td>
+</tr>
+</tbody>
+</table>
+";
+            Assert.Equal(expected.Replace("\r\n", "\n"), marked);
+            Assert.Equal(
+                new[] { "api.json" },
+                dependency.OrderBy(x => x));
+        }
+
+        [Fact]
+        [Trait("Related", "DfmMarkdown")]
+        public void TestDfmFencesBlockLevelWithWorkingFolder()
+        {
+            var root = @"[!code-REST[REST](~/api.json)]";
+            var apiJsonContent = @"
+{
+   ""method"": ""GET"",
+   ""resourceFormat"": ""https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End"",
+   ""requestUrl"": ""https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End"",
+   ""requestHeaders"": {
+                ""Accept"": ""application/json""
+   }
+}";
+            File.WriteAllText("api.json", apiJsonContent.Replace("\r\n", "\n"));
+            var dependency = new HashSet<string>();
+            var marked = DocfxFlavoredMarked.Markup(root, "api.json", dependency: dependency);
+            Assert.Equal(@"<pre><code class=""lang-REST"" name=""REST"">
+{
+   &quot;method&quot;: &quot;GET&quot;,
+   &quot;resourceFormat&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestUrl&quot;: &quot;https://outlook.office.com/api/v1.0/me/events?$select=Subject,Organizer,Start,End&quot;,
+   &quot;requestHeaders&quot;: {
+                &quot;Accept&quot;: &quot;application/json&quot;
+   }
+}
+</code></pre>".Replace("\r\n", "\n"), marked);
+            Assert.Equal(
+                new[] { "~/api.json" },
+                dependency.OrderBy(x => x));
+        }
+
         [Theory]
         [Trait("Owner", "humao")]
         [Trait("Related", "DfmMarkdown")]
+        #region Inline Data
         [InlineData(@"[!code-csharp[Main](Program.cs)]", @"<pre><code class=""lang-csharp"" name=""Main"">namespace ConsoleApplication1
 {
     // &lt;namespace&gt;
@@ -891,7 +1030,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
         public static void Foo()
         {
         }
-        #endregion
+        #endregion Foo
     }
     #endregion
 }
@@ -917,7 +1056,7 @@ tag started with alphabet should not be encode: <abc> <a-hello> <a?world> <a_b h
         public static void Foo()
         {
         }
-        #endregion
+        #endregion Foo
     }
     #endregion
 }
@@ -1016,7 +1155,7 @@ namespace ConsoleApplication1
         public static void Foo()
         {
         }
-        #endregion
+        #endregion Foo
     }
     #endregion
 }
@@ -1081,7 +1220,7 @@ namespace ConsoleApplication1
         public static void Foo()
         {
         }
-        #endregion
+        #endregion Foo
     }
     #endregion
 }
@@ -1108,6 +1247,7 @@ public static void Foo()
     #endregion
 }
 </code></pre>")]
+        #endregion
         public void TestDfmFencesBlockLevelWithQueryString(string fencesPath, string expectedContent)
         {
             // arrange
@@ -1137,7 +1277,7 @@ public static void Foo()
         public static void Foo()
         {
         }
-        #endregion
+        #endregion Foo
     }
     #endregion
 }";

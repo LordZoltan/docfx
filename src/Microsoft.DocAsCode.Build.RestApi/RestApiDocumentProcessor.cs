@@ -14,19 +14,21 @@ namespace Microsoft.DocAsCode.Build.RestApi
     using Microsoft.DocAsCode.Build.Common;
     using Microsoft.DocAsCode.Build.RestApi.Swagger;
     using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.Common.Git;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.DataContracts.RestApi;
+    using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     using Newtonsoft.Json;
     using Newtonsoft.Json.Linq;
 
     [Export(typeof(IDocumentProcessor))]
-    public class RestApiDocumentProcessor : DisposableDocumentProcessor
+    public class RestApiDocumentProcessor : ReferenceDocumentProcessorBase
     {
         private const string RestApiDocumentType = "RestApi";
         private const string DocumentTypeKey = "documentType";
+        private const string OperationIdKey = "operationId";
 
         // To keep backward compatibility, still support and change previous file endings by first mapping sequence.
         // Take 'a.b_swagger2.json' for an example, the json file name would be changed to 'a.b', then the html file name would be 'a.b.html'.
@@ -37,6 +39,21 @@ namespace Microsoft.DocAsCode.Build.RestApi
            ".swagger.json",
            ".swagger2.json",
            ".json",
+        };
+
+        protected static readonly string[] SystemKeys = {
+            "uid",
+            "htmlId",
+            "name",
+            "conceptual",
+            "description",
+            "remarks",
+            "summary",
+            "documentation",
+            "tags",
+            "children",
+            "documentType",
+            "source"
         };
 
         [ImportMany(nameof(RestApiDocumentProcessor))]
@@ -66,42 +83,6 @@ namespace Microsoft.DocAsCode.Build.RestApi
             return ProcessingPriority.NotSupported;
         }
 
-        public override FileModel Load(FileAndType file, ImmutableDictionary<string, object> metadata)
-        {
-            switch (file.Type)
-            {
-                case DocumentType.Article:
-                    var filePath = Path.Combine(file.BaseDir, file.File);
-                    var swaggerContent = File.ReadAllText(filePath);
-                    var swagger = SwaggerJsonParser.Parse(swaggerContent);
-                    swagger.Metadata[DocumentTypeKey] = RestApiDocumentType;
-                    swagger.Raw = swaggerContent;
-                    var repoInfo = GitUtility.GetGitDetail(filePath);
-                    if (repoInfo != null)
-                    {
-                        swagger.Metadata["source"] = new SourceDetail() { Remote = repoInfo };
-                    }
-
-                    swagger.Metadata = MergeMetadata(swagger.Metadata, metadata);
-                    var vm = SwaggerModelConverter.FromSwaggerModel(swagger);
-                    var displayLocalPath = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, file.FullPath);
-
-                    return new FileModel(file, vm, serializer: Environment.Is64BitProcess ? null : new BinaryFormatter())
-                    {
-                        Uids = new[] { new UidDefinition(vm.Uid, displayLocalPath) }
-                            .Concat(from item in vm.Children select new UidDefinition(item.Uid, displayLocalPath))
-                            .Concat(from tag in vm.Tags select new UidDefinition(tag.Uid, displayLocalPath)).ToImmutableArray(),
-                        LocalPathFromRepoRoot = repoInfo?.RelativePath ?? filePath.ToDisplayPath(),
-                        LocalPathFromRoot = displayLocalPath
-                    };
-                case DocumentType.Overwrite:
-                    // TODO: Refactor current behavior that overwrite file is read multiple times by multiple processors
-                    return OverwriteDocumentReader.Read(file);
-                default:
-                    throw new NotSupportedException();
-            }
-        }
-
         public override SaveResult Save(FileModel model)
         {
             if (model.Type != DocumentType.Article)
@@ -109,26 +90,94 @@ namespace Microsoft.DocAsCode.Build.RestApi
                 throw new NotSupportedException();
             }
             var vm = (RestApiRootItemViewModel)model.Content;
-            string documentType = null;
+
             object documentTypeObject;
             if (vm.Metadata.TryGetValue(DocumentTypeKey, out documentTypeObject))
             {
-                documentType = documentTypeObject as string;
+                var documentType = documentTypeObject as string;
+                if (documentType != null)
+                {
+                    model.DocumentType = documentType;
+                }
+            }
+            model.File = ChangeFileExtension(model.File);
+
+            var result = base.Save(model);
+            result.XRefSpecs = GetXRefInfo(vm, model.Key).ToImmutableArray();
+            return result;
+        }
+
+        #region ReferenceDocumentProcessorBase Members
+
+        protected override string ProcessedDocumentType { get; } = RestApiDocumentType;
+
+        protected override FileModel LoadArticle(FileAndType file, ImmutableDictionary<string, object> metadata)
+        {
+            var filePath = Path.Combine(file.BaseDir, file.File);
+            var swagger = SwaggerJsonParser.Parse(filePath);
+            swagger.Metadata[DocumentTypeKey] = RestApiDocumentType;
+            swagger.Raw = EnvironmentContext.FileAbstractLayer.ReadAllText(filePath);
+            CheckOperationId(swagger, file.File);
+
+            var repoInfo = GitUtility.TryGetFileDetail(filePath);
+            if (repoInfo != null)
+            {
+                swagger.Metadata["source"] = new SourceDetail() { Remote = repoInfo };
             }
 
-            model.File = ChangeFileExtension(model.File);
-            return new SaveResult
+            swagger.Metadata = MergeMetadata(swagger.Metadata, metadata);
+            var vm = SwaggerModelConverter.FromSwaggerModel(swagger);
+            vm.Metadata[Constants.PropertyName.SystemKeys] = SystemKeys;
+            var displayLocalPath = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, file.FullPath);
+
+            return new FileModel(file, vm, serializer: Environment.Is64BitProcess ? null : new BinaryFormatter())
             {
-                DocumentType = documentType ?? RestApiDocumentType,
-                FileWithoutExtension = Path.ChangeExtension(model.File, null),
-                LinkToFiles = model.LinkToFiles.ToImmutableArray(),
-                LinkToUids = model.LinkToUids,
-                FileLinkSources = model.FileLinkSources,
-                UidLinkSources = model.UidLinkSources,
+                Uids = new[] { new UidDefinition(vm.Uid, displayLocalPath) }
+                    .Concat(from item in vm.Children select new UidDefinition(item.Uid, displayLocalPath))
+                    .Concat(from tag in vm.Tags select new UidDefinition(tag.Uid, displayLocalPath)).ToImmutableArray(),
+                LocalPathFromRoot = displayLocalPath
             };
         }
 
+        #endregion
+
         #region Private methods
+
+        private static IEnumerable<XRefSpec> GetXRefInfo(RestApiRootItemViewModel rootItem, string key)
+        {
+            yield return new XRefSpec
+            {
+                Uid = rootItem.Uid,
+                Name = rootItem.Name,
+                Href = key,
+            };
+
+            if (rootItem.Children != null)
+            {
+                foreach (var child in rootItem.Children)
+                {
+                    yield return new XRefSpec
+                    {
+                        Uid = child.Uid,
+                        Name = child.OperationId,
+                        Href = key,
+                    };
+                }
+            }
+
+            if (rootItem.Tags != null)
+            {
+                foreach (var tag in rootItem.Tags)
+                {
+                    yield return new XRefSpec
+                    {
+                        Uid = tag.Uid,
+                        Name = tag.Name,
+                        Href = key,
+                    };
+                }
+            }
+        }
 
         private static bool IsSupportedFile(string filePath)
         {
@@ -144,7 +193,7 @@ namespace Microsoft.DocAsCode.Build.RestApi
         {
             try
             {
-                using (var streamReader = File.OpenText(filePath))
+                using (var streamReader = EnvironmentContext.FileAbstractLayer.OpenReadText(filePath))
                 using (JsonReader reader = new JsonTextReader(streamReader))
                 {
                     var jObject = JObject.Load(reader);
@@ -169,6 +218,25 @@ namespace Microsoft.DocAsCode.Build.RestApi
             }
 
             return false;
+        }
+
+        private static void CheckOperationId(SwaggerModel swagger, string fileName)
+        {
+            if (swagger.Paths != null)
+            {
+                foreach (var path in swagger.Paths)
+                {
+                    foreach (var operation in path.Value.Metadata)
+                    {
+                        JToken operationId;
+                        var jObject = operation.Value as JObject;
+                        if (jObject != null && !jObject.TryGetValue(OperationIdKey, out operationId))
+                        {
+                            throw new DocfxException($"{OperationIdKey} should exist in operation '{operation.Key}' of path '{path.Key}' for swagger file '{fileName}'");
+                        }
+                    }
+                }
+            }
         }
 
         private static string ChangeFileExtension(string file)

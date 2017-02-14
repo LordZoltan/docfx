@@ -12,8 +12,8 @@ namespace Microsoft.DocAsCode.Build.Common
     using System.Runtime.Serialization;
 
     using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.Common.StreamSegmentSerialization;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility.StreamSegmentSerialization;
 
     public static class FileModelPropertySerialization
     {
@@ -61,7 +61,6 @@ namespace Microsoft.DocAsCode.Build.Common
                 formatter);
 
             // Deserialize basic properties.
-            result.LocalPathFromRepoRoot = (string)basicProperties[nameof(FileModel.LocalPathFromRepoRoot)];
             result.LocalPathFromRoot = (string)basicProperties[nameof(FileModel.LocalPathFromRoot)];
             result.LinkToFiles = ((object[])basicProperties[nameof(FileModel.LinkToFiles)]).OfType<string>().ToImmutableHashSet();
             result.LinkToUids = ((object[])basicProperties[nameof(FileModel.LinkToUids)]).OfType<string>().ToImmutableHashSet();
@@ -119,13 +118,12 @@ namespace Microsoft.DocAsCode.Build.Common
                 Model = model;
             }
 
-            public int Count => 10;
+            public int Count => 9;
 
             public IEnumerator<KeyValuePair<string, object>> GetEnumerator()
             {
                 yield return new KeyValuePair<string, object>(nameof(Model.FileAndType), JsonUtility.ToJsonString(Model.FileAndType));
                 yield return new KeyValuePair<string, object>(nameof(Model.OriginalFileAndType), JsonUtility.ToJsonString(Model.OriginalFileAndType));
-                yield return new KeyValuePair<string, object>(nameof(Model.LocalPathFromRepoRoot), Model.LocalPathFromRepoRoot);
                 yield return new KeyValuePair<string, object>(nameof(Model.LocalPathFromRoot), Model.LocalPathFromRoot);
                 yield return new KeyValuePair<string, object>(nameof(Model.LinkToFiles), Model.LinkToFiles);
                 yield return new KeyValuePair<string, object>(nameof(Model.LinkToUids), Model.LinkToUids);

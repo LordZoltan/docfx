@@ -13,14 +13,12 @@ namespace Microsoft.DocAsCode.Dfm
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
-    using Microsoft.DocAsCode.Utility;
+    using Microsoft.DocAsCode.Plugins;
 
     internal sealed class DocfxFlavoredIncHelper : IDisposable
     {
         private readonly FileCacheLite _cache;
         private readonly Dictionary<string, HashSet<string>> _dependencyCache = new Dictionary<string, HashSet<string>>();
-
-        public static readonly string InlineIncRegexString = @"^\[!INCLUDE\s*\[((?:\[[^\]]*\]|[^\[\]]|\](?=[^\[]*\]))*)\]\(\s*<?([^)]*?)>?(?:\s+(['""])([\s\S]*?)\3)?\s*\)\]";
 
         public DocfxFlavoredIncHelper()
         {
@@ -69,9 +67,9 @@ namespace Microsoft.DocAsCode.Dfm
                     !_cache.TryGet(currentPath, out result))
                 {
                     var filePathWithStatus = DfmFallbackHelper.GetFilePathWithFallback(originalRelativePath, context);
-                    var src = File.ReadAllText(filePathWithStatus.Item1);
+                    var src = EnvironmentContext.FileAbstractLayer.ReadAllText(filePathWithStatus.Item1);
                     dependency = new HashSet<string>();
-                    src = engine.InternalMarkup(src, context.SetFilePathStack(parents).SetDependency(dependency).SetIsInclude());
+                    src = new DfmEngine(engine).InternalMarkup(src, context.SetFilePathStack(parents).SetDependency(dependency).SetIsInclude());
 
                     result = UpdateToHrefFromWorkingFolder(src, currentPath);
                     result = GenerateNodeWithCommentWrapper("INCLUDE", $"Include content from \"{currentPath}\"", result);

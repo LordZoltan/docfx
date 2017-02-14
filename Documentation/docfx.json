@@ -5,7 +5,7 @@
         {
           "files": [ "**/project.json" ],
           "exclude": [ "**/bin/**", "**/obj/**" ],
-          "cwd": "../src"
+          "src": "../src"
         }
       ],
       "dest": "obj/temp/docfxapi"
@@ -42,8 +42,6 @@
       "_gitContribute": {
         "branch": "dev"
       }
-      // This option is deprecated
-      //"_enableSearch": true
     },
     "fileMetadata": {
       "priority": {

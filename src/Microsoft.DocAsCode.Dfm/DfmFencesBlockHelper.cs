@@ -3,12 +3,19 @@
 
 namespace Microsoft.DocAsCode.Dfm
 {
+    using System;
+
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
 
     public static class DfmFencesBlockHelper
     {
-        public static string GetRenderedFencesBlockString(DfmFencesBlockToken token, Options options, string errorMessage, string[] codeLines = null)
+        [Obsolete]
+        public static string GetRenderedFencesBlockString(DfmFencesBlockToken token, Options options,
+            string errorMessage, string[] codeLines = null)
+            => GetRenderedFencesBlockString((DfmFencesToken)token, options, errorMessage, codeLines);
+
+        public static string GetRenderedFencesBlockString(DfmFencesToken token, Options options, string errorMessage, string[] codeLines = null)
         {
             string renderedErrorMessage = string.Empty;
             string renderedCodeLines = string.Empty;
@@ -32,7 +39,11 @@ namespace Microsoft.DocAsCode.Dfm
             return $"{renderedErrorMessage}{renderedCodeLines}";
         }
 
+        [Obsolete]
         public static string GenerateReferenceNotFoundErrorMessage(IMarkdownRenderer renderer, DfmFencesBlockToken token)
+            => GenerateReferenceNotFoundErrorMessage(renderer, (DfmFencesToken)token);
+
+        public static string GenerateReferenceNotFoundErrorMessage(IMarkdownRenderer renderer, DfmFencesToken token)
         {
             var errorMessageInMarkdown = $"Can not find reference {token.Path}";
             var errorMessage = $"Unable to resolve {token.SourceInfo.Markdown}. {errorMessageInMarkdown}. at line {token.SourceInfo.LineNumber}.";

@@ -11,7 +11,6 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
     using System.Reflection;
 
     using Microsoft.DocAsCode.Common;
-    using Microsoft.DocAsCode.Utility;
 
     internal abstract class CacheBase
     {
@@ -35,13 +34,13 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
 
         public BuildInfo GetValidConfig(IEnumerable<string> inputProjects)
         {
-            var key = inputProjects.GetNormalizedFullPathKey();
+            var key = StringExtension.GetNormalizedFullPathKey(inputProjects);
             return GetConfig(key);
         }
 
-        public void SaveToCache(IEnumerable<string> inputProjects, IDictionary<string, List<string>> containedFiles, DateTime triggeredTime, string outputFolder, IList<string> fileRelativePaths)
+        public void SaveToCache(IEnumerable<string> inputProjects, IDictionary<string, List<string>> containedFiles, DateTime triggeredTime, string outputFolder, IList<string> fileRelativePaths, bool shouldSkipMarkup)
         {
-            var key = inputProjects.GetNormalizedFullPathKey();
+            var key = StringExtension.GetNormalizedFullPathKey(inputProjects);
             DateTime completeTime = DateTime.UtcNow;
             BuildInfo info = new BuildInfo
             {
@@ -49,9 +48,10 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 ContainedFiles = containedFiles,
                 TriggeredUtcTime = triggeredTime,
                 CompleteUtcTime = completeTime,
-                OutputFolder = outputFolder.ToNormalizedFullPath(),
-                RelatvieOutputFiles = fileRelativePaths.GetNormalizedPathList(),
+                OutputFolder = StringExtension.ToNormalizedFullPath(outputFolder),
+                RelatvieOutputFiles = StringExtension.GetNormalizedPathList(fileRelativePaths),
                 BuildAssembly = AssemblyName,
+                ShouldSkipMarkup = shouldSkipMarkup
             };
             this.SaveConfig(key, info);
         }

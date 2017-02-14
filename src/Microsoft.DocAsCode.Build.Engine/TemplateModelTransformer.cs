@@ -11,7 +11,6 @@ namespace Microsoft.DocAsCode.Build.Engine
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     public class TemplateModelTransformer
     {
@@ -93,9 +92,6 @@ namespace Microsoft.DocAsCode.Build.Engine
                 {
                     var extension = template.Extension;
                     string outputFile = item.FileWithoutExtension + extension;
-                    string outputPath = Path.Combine(outputDirectory, outputFile);
-                    var dir = Path.GetDirectoryName(outputPath);
-                    if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
                     object viewModel = null;
                     try
                     {
@@ -139,13 +135,9 @@ namespace Microsoft.DocAsCode.Build.Engine
                             var exportSettings = ApplyTemplateSettings.ViewModelExportSettingsForDebug;
                             var viewModelPath = ExportModel(viewModel, outputFile, exportSettings);
                             Logger.LogWarning($"Model \"{viewModelPath}\" is transformed to empty string with template \"{template.Name}\"");
-                            File.WriteAllText(outputPath, string.Empty);
                         }
-                        else
-                        {
-                            TransformDocument(result, extension, _context, outputPath, outputFile, missingUids, manifestItem);
-                            Logger.LogDiagnostic($"Transformed model \"{item.LocalPathFromRoot}\" to \"{outputPath}\".");
-                        }
+                        TransformDocument(result ?? string.Empty, extension, _context, outputFile, missingUids, manifestItem);
+                        Logger.LogDiagnostic($"Transformed model \"{item.LocalPathFromRoot}\" to \"{outputFile}\".");
                     }
                 }
                 catch (PathTooLongException e)
@@ -159,7 +151,7 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (missingUids.Count > 0)
             {
                 var uids = string.Join(", ", missingUids.Select(s => $"\"{s}\""));
-                Logger.LogWarning($"Unable to resolve cross-reference {uids}");
+                Logger.LogWarning($"Invalid cross reference {uids}.", null, item.LocalPathFromRoot);
             }
 
             return manifestItem;
@@ -202,33 +194,29 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         private static string ExportModel(object model, string modelFileRelativePath, ExportSettings settings)
         {
-            if (model == null) return null;
-            var outputFolder = settings.OutputFolder;
+            if (model == null)
+            {
+                return null;
+            }
+            var outputFolder = settings.OutputFolder ?? string.Empty;
 
-            string modelPath = Path.Combine(outputFolder ?? string.Empty, settings.PathRewriter(modelFileRelativePath));
+            string modelPath = Path.GetFullPath(Path.Combine(outputFolder, settings.PathRewriter(modelFileRelativePath)));
 
             JsonUtility.Serialize(modelPath, model);
-            return modelPath.ToDisplayPath();
+            return StringExtension.ToDisplayPath(modelPath);
         }
 
-        private static void TransformDocument(string result, string extension, IDocumentBuildContext context, string outputPath, string relativeOutputPath, HashSet<string> missingUids, ManifestItem manifestItem)
+        private void TransformDocument(string result, string extension, IDocumentBuildContext context, string destFilePath, HashSet<string> missingUids, ManifestItem manifestItem)
         {
-            var subDirectory = Path.GetDirectoryName(outputPath);
-            if (!string.IsNullOrEmpty(subDirectory) &&
-                !Directory.Exists(subDirectory))
-            {
-                Directory.CreateDirectory(subDirectory);
-            }
-
             Task<byte[]> hashTask;
-            using (var stream = File.Create(outputPath).WithMd5Hash(out hashTask))
+            using (var stream = EnvironmentContext.FileAbstractLayer.Create(destFilePath).WithMd5Hash(out hashTask))
             using (var sw = new StreamWriter(stream))
             {
                 if (extension.Equals(".html", StringComparison.OrdinalIgnoreCase))
                 {
                     try
                     {
-                        TranformHtml(context, result, relativeOutputPath, sw);
+                        TransformHtml(context, result, manifestItem.SourceRelativePath, destFilePath, sw);
                     }
                     catch (AggregateException e)
                     {
@@ -254,18 +242,29 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
             manifestItem.OutputFiles.Add(extension, new OutputFileInfo
             {
-                RelativePath = relativeOutputPath,
+                RelativePath = destFilePath,
                 LinkToPath = null,
                 Hash = Convert.ToBase64String(hashTask.Result)
             });
         }
 
-        private static void TranformHtml(IDocumentBuildContext context, string transformed, string relativeModelPath, StreamWriter outputWriter)
+        private void TransformHtml(IDocumentBuildContext context, string html, string sourceFilePath, string destFilePath, StreamWriter outputWriter)
         {
-            // Update HREF and XREF
-            HtmlAgilityPack.HtmlDocument html = new HtmlAgilityPack.HtmlDocument();
-            html.LoadHtml(transformed);
+            // Update href and xref
+            HtmlAgilityPack.HtmlDocument document = new HtmlAgilityPack.HtmlDocument();
+            document.LoadHtml(html);
 
+            var xrefExceptions = TransformHtmlCore(context, sourceFilePath, destFilePath, document);
+
+            document.Save(outputWriter);
+            if (xrefExceptions.Count > 0)
+            {
+                throw new AggregateException(xrefExceptions);
+            }
+        }
+
+        private List<CrossReferenceNotResolvedException> TransformHtmlCore(IDocumentBuildContext context, string sourceFilePath, string destFilePath, HtmlAgilityPack.HtmlDocument html)
+        {
             var xrefLinkNodes = html.DocumentNode.SelectNodes("//a[starts-with(@href, 'xref:')]");
             if (xrefLinkNodes != null)
             {
@@ -276,7 +275,8 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
 
             var xrefExceptions = new List<CrossReferenceNotResolvedException>();
-            var xrefNodes = html.DocumentNode.SelectNodes("//xref/@href");
+            var xrefNodes = html.DocumentNode.SelectNodes("//xref")?
+                .Where(s => s.GetAttributeValue("href", null) != null || s.GetAttributeValue("uid", null) != null).ToList();
             if (xrefNodes != null)
             {
                 foreach (var xref in xrefNodes)
@@ -296,7 +296,7 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (srcNodes != null)
                 foreach (var link in srcNodes)
                 {
-                    UpdateHref(link, "src", context, relativeModelPath);
+                    UpdateHref(link, "src", context, sourceFilePath, destFilePath);
                 }
 
             var hrefNodes = html.DocumentNode.SelectNodes("//*/@href");
@@ -304,15 +304,11 @@ namespace Microsoft.DocAsCode.Build.Engine
             {
                 foreach (var link in hrefNodes)
                 {
-                    UpdateHref(link, "href", context, relativeModelPath);
+                    UpdateHref(link, "href", context, sourceFilePath, destFilePath);
                 }
             }
 
-            html.Save(outputWriter);
-            if (xrefExceptions.Count > 0)
-            {
-                throw new AggregateException(xrefExceptions);
-            }
+            return xrefExceptions;
         }
 
         private static void TransformXrefLink(HtmlAgilityPack.HtmlNode node, IDocumentBuildContext context)
@@ -336,54 +332,73 @@ namespace Microsoft.DocAsCode.Build.Engine
             {
                 if (xref.ThrowIfNotResolved)
                 {
-                    throw new CrossReferenceNotResolvedException(xref.Uid, xref.Raw, null);
+                    throw new CrossReferenceNotResolvedException(xref.Uid, xref.RawSource, null);
                 }
             }
         }
 
-        private static void UpdateHref(HtmlAgilityPack.HtmlNode link, string attribute, IDocumentBuildContext context, string relativePath)
+        private void UpdateHref(HtmlAgilityPack.HtmlNode link, string attribute, IDocumentBuildContext context, string sourceFilePath, string destFilePath)
         {
-            var key = link.GetAttributeValue(attribute, null);
-            string path;
-            if (RelativePath.TryGetPathWithoutWorkingFolderChar(key, out path))
+            var originalHref = link.GetAttributeValue(attribute, null);
+            var anchor = link.GetAttributeValue("anchor", null);
+            link.Attributes.Remove("anchor");
+            var originalPath = UriUtility.GetPath(originalHref);
+            var path = RelativePath.TryParse(originalPath);
+
+            if (path == null)
             {
-                var href = context.GetFilePath(key);
-                var anchor = link.GetAttributeValue("anchor", null);
+                return;
+            }
 
-                if (href != null)
+            var fli = new FileLinkInfo
+            {
+                FromFileInSource = sourceFilePath,
+                FromFileInDest = destFilePath,
+            };
+
+            if (path.IsFromWorkingFolder())
+            {
+                var targetInSource = path.UrlDecode();
+                fli.ToFileInSource = targetInSource.RemoveWorkingFolder();
+                fli.ToFileInDest = RelativePath.GetPathWithoutWorkingFolderChar(context.GetFilePath(targetInSource));
+                fli.FileLinkInSource = targetInSource - (RelativePath)sourceFilePath;
+                if (fli.ToFileInDest != null)
                 {
-                    href = ((RelativePath)UpdateFilePath(href, relativePath)).UrlEncode();
-
-                    if (!string.IsNullOrEmpty(anchor))
-                    {
-                        href += anchor;
-                        link.Attributes.Remove("anchor");
-                    }
-                    link.SetAttributeValue(attribute, href);
+                    var resolved = (RelativePath)fli.ToFileInDest - (RelativePath)destFilePath;
+                    fli.FileLinkInDest = resolved;
+                    fli.Href = resolved.UrlEncode();
                 }
                 else
                 {
-                    Logger.LogWarning($"File {path} is not found in {relativePath}.");
-                    // TODO: what to do if file path not exists?
-                    // CURRENT: fallback to the original one
-                    if (!string.IsNullOrEmpty(anchor))
-                    {
-                        path += anchor;
-                        link.Attributes.Remove("anchor");
-                    }
-                    link.SetAttributeValue(attribute, path);
+                    fli.Href = (targetInSource.RemoveWorkingFolder() - ((RelativePath)sourceFilePath).RemoveWorkingFolder()).UrlEncode();
                 }
             }
+            else
+            {
+                fli.FileLinkInSource = path.UrlDecode();
+                fli.ToFileInSource = ((RelativePath)sourceFilePath + path).RemoveWorkingFolder();
+                fli.FileLinkInDest = fli.FileLinkInSource;
+                fli.Href = originalPath;
+            }
+            var href = _settings.HrefGenerator?.GenerateHref(fli) ?? fli.Href;
+            link.SetAttributeValue(attribute, href + UriUtility.GetQueryString(originalHref) + (anchor ?? UriUtility.GetFragment(originalHref)));
         }
 
-        private static string UpdateFilePath(string path, string modelFilePathToRoot)
+        private struct FileLinkInfo : IFileLinkInfo
         {
-            if (RelativePath.IsPathFromWorkingFolder(path))
-            {
-                return ((RelativePath)path).RemoveWorkingFolder().MakeRelativeTo((RelativePath)modelFilePathToRoot);
-            }
+            public string Href { get; set; }
 
-            return path;
+            public string FromFileInDest { get; set; }
+
+            public string FromFileInSource { get; set; }
+
+            public string ToFileInDest { get; set; }
+
+            public string ToFileInSource { get; set; }
+
+            public string FileLinkInSource { get; set; }
+
+            public string FileLinkInDest { get; set; }
         }
     }
 }

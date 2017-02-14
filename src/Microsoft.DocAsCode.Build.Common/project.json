@@ -15,13 +15,12 @@
     "Microsoft.DocAsCode.MarkdownLite": "1.0.0",
     "Microsoft.DocAsCode.DataContracts.Common": "1.0.0",
     "Microsoft.DocAsCode.Plugins": "1.0.0",
-    "Microsoft.DocAsCode.Utility": "1.0.0",
     "Microsoft.DocAsCode.YamlSerialization": "1.0.0",
     "Newtonsoft.Json": "9.0.1",
     "HtmlAgilityPack": "1.4.9",
     "Microsoft.Composition": "1.0.27",
     "System.Collections.Immutable": "1.2.0",
-    "YamlDotNet.Signed": "3.9.0"
+    "YamlDotNet.Signed": "4.1.0"
   },
   "configurations": {
     "Debug": {
@@ -37,6 +36,10 @@
     }
   },
   "frameworks": {
-    "net452": {}
+    "net452": {
+      "frameworkAssemblies": {
+        "System.Web": ""
+      }
+    }
   }
 }

@@ -20,6 +20,15 @@ namespace Microsoft.DocAsCode.Common.Tests
         [InlineData(" Add --globalMetadata, --globalMetadataFile and --fileMetadataFile\n")]
         [InlineData("\r\n Hello\n")]
         [InlineData("  \r\n Hello\n")]
+        [InlineData("True")]
+        [InlineData("true")]
+        [InlineData("TRUE")]
+        [InlineData("False")]
+        [InlineData("false")]
+        [InlineData("FALSE")]
+        [InlineData("Null")]
+        [InlineData("null")]
+        [InlineData("NULL")]
         public void TestObjectWithStringProperty(string input)
         {
             var sw = new StringWriter();
@@ -28,6 +37,18 @@ namespace Microsoft.DocAsCode.Common.Tests
             var value = YamlUtility.Deserialize<BasicClass>(new StringReader(yaml));
             Assert.NotNull(value);
             Assert.Equal(input, value.C);
+        }
+
+        [Fact]
+        public void TestNotWorkInYamlDotNet39()
+        {
+            const string Text = "😄";
+            var sw = new StringWriter();
+            YamlUtility.Serialize(sw, new BasicClass { C = Text });
+            var yaml = sw.ToString();
+            var value = YamlUtility.Deserialize<BasicClass>(new StringReader(yaml));
+            Assert.NotNull(value);
+            Assert.Equal(Text, value.C);
         }
 
         [Fact]
@@ -45,6 +66,34 @@ C: Good!
             Assert.NotNull(value);
             Assert.Equal(1, value.B);
             Assert.Equal("Good!", value.C);
+        }
+
+        [Fact]
+        public void TestBoolean()
+        {
+            var sw = new StringWriter();
+            YamlUtility.Serialize(sw, new object[] { true, false }, YamlMime.YamlMimePrefix + "Test-Yaml-Mime");
+            var yaml = sw.ToString();
+            Assert.Equal(@"### YamlMime:Test-Yaml-Mime
+- true
+- false
+".Replace("\r\n", "\n"), yaml.Replace("\r\n", "\n"));
+            Assert.Equal("YamlMime:Test-Yaml-Mime", YamlMime.ReadMime(new StringReader(yaml)));
+            var value = YamlUtility.Deserialize<object[]>(new StringReader(yaml));
+            Assert.NotNull(value);
+            Assert.Equal(2, value.Length);
+            Assert.Equal(true, value[0]);
+            Assert.Equal(false, value[1]);
+            var value2 = YamlUtility.Deserialize<object[]>(new StringReader(@"### YamlMime:Test-Yaml-Mime
+- true
+- True
+- TRUE
+- false
+- False
+- FALSE
+"));
+            Assert.NotNull(value2);
+            Assert.Equal(new[] { true, true, true, false, false, false }, value2.Cast<bool>());
         }
 
         [Fact]

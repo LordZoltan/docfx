@@ -1,7 +1,161 @@
-Version Notes (Current Version: v2.6)
+﻿Version Notes (Current Version: v2.13)
 =======================================
-v2.6(Pre-Release)
+v2.13(Pre-Release)
 -----------
+1.  Support working folder for dfm include and code.
+
+v2.12
+-----------
+1.  Bug fixes:
+    1. `default` template: Do not load `search-worker.js` when search is disabled in `docfx.js`
+    2. C# region support for code snippets broken by #endregion with extra text. https://github.com/dotnet/docfx/issues/1200
+    3. Markdown list continue with def.
+    4. Markdown link rule is not allowed in link text.
+    5. Markdown list restore wrong context.
+    6. Metadata `_docfxVersion` can't be overwritten. https://github.com/dotnet/docfx/issues/1251
+    7. `statictoc` template out of sync with `default` template. https://github.com/dotnet/docfx/issues/1256
+    8. Fix footer covering sidetoc. https://github.com/dotnet/docfx/issues/1222
+
+
+v2.11
+-----------
+1.  Export custom href generator.
+2.  Introduce attribute driven data model to Managed Reference
+3.  Bug fixes:
+    1. Generate overload name/fullname form generic method should not contain method parameter.
+    2. Fix href for markdown link to non-exist files in include files.
+
+v2.10
+-----------
+1.  Bug fixes:
+    1. Markdown table content is misplaced if there is empty column in it.
+    2. Markdown include should not share link context.
+    3. Fix rawTitle when article's first line is HTML comment.
+
+v2.9.3
+-----------
+1.  hotfix for wrong file link check message.
+
+v2.9.2
+-----------
+1.  Remove commit id to avoid config hash changed.
+
+v2.9.1
+-----------
+1.  Enable to show derived classes.
+2.  Add log for config hash.
+
+v2.9
+-----------
+1.  **Breaking Change** Using `<span class="xxx">` for languageKeyWord, paramref and typeparamref in generated yml files, instead of using `<em>` and `<strong>`. Change default template accordingly.
+2.  Remove project `Microsoft.DocAsCode.Utility`, move class to `Microsoft.DocAsCode.Common`.
+3.  Get documentation's git information with git command instead of `GitSharp`.
+4.  REST:
+    - Support `remarks` to be overwritten.
+    - Support reference in parameters to be overwritten.
+    - Support DFM syntax in swagger description
+5.  Bug fixes:
+    1. Fix inherited member's name when xref unresolved.
+    2. Fix missing items in breadcrumb. (https://github.com/dotnet/docfx/issues/944)
+    3. Fix generating overload method names from generic method.
+    4. Fix full text search not work in index page.
+    5. Fix the warning that no highlight function defined.
+
+v2.8.2
+-----------
+1.  Fix bug: throw error when md contain wrong path..
+
+v2.8.1
+-----------
+1.  Fix bug: RelativePath.TryParse should not throw error when path contains invalid path characters.
+
+v2.8
+-----------
+1.  Improve markdown engine:
+    - Remove paragraph rule.
+    - Improve parser performance.
+2.  Report bookmarks in template preprocessor, which is used in URL segment when resolving cross reference.
+3.  Support customizing logo and favicon through metadata. (https://github.com/dotnet/docfx/pull/892)
+4.  Refine the warning message of invalid bookmark.
+5.  Improve layout for print. (https://github.com/dotnet/docfx/issues/852)
+6.  Remove the usage of `FileModel.LocalPathFromRepoRoot`. This property is marked `Obsolete`.
+7.  Copy `PathUtility`, `RelativePath`, `StringExtension` and `FilePathComparer` from project `Microsoft.DocAsCode.Utility` to `Microsoft.DocAsCode.Common`. The copied classes in project `Microsoft.DocAsCode.Utility` are kept there for bits compatibility and marked `Obsolete`.
+8.  Add command option `docfx -v` to show version of DocFX
+9.  Bug fixes:
+    1. concurrency issue of `Logger`.
+    2. unable to handle file link with query string.
+    3. unable to resolve uid for in html `<a href="xref:...">`.
+    4. display specName wrong for generic type. (https://github.com/dotnet/docfx/issues/896)
+    5. breadcrumb rendered wrong when multiple toc item matched.
+    6. subcommand metadata can't specify DocFX config file
+
+v2.7.3
+-----------
+1.  Fix bookmark validation failed when link contains illegal characters.
+2.  Fix xref to fall back to uid.
+
+v2.7.2
+-----------
+1.  Fix xref with query string not resolved.
+2.  Fix relative path when validating bookmark.
+
+v2.7.1
+-----------
+1.  Search embedded resource prior to local resource.
+
+v2.7
+-----------
+1.  Improve markdown engine performance.
+    - Improve regex.
+    - Add regex timeout.
+2.  Fix bugs in markdown parser.
+3.  Refine xref.
+    - Provide more options.
+    - Support options in query string.
+4.  Support query string in toc href.
+5.  Remove debug information in html.
+6.  Add metadata command option to disable rendering triple-slash-comments as markdown.
+7.  Fix bug in merging properties.
+8.  Support extension for preprocessor file in default template. (https://github.com/dotnet/docfx/issues/662)
+9.  Improve error/warning message.
+10. Support bookmark validation.
+
+v2.6.3
+-----------
+1.  minor: fix the Renderer
+
+v2.6.2
+-----------
+1.  Improve markdown engine performance.
+    - Improve regex.
+    - Add regex timeout.
+2.  Fix bugs in markdown parser.
+3.  DFM: Support code in table
+
+v2.6.1
+-----------
+1.  Fix argumentnullexception for generating overload item.
+2.  Add serializable attribute.
+3.  Use mark.js to highlight keywords.
+
+v2.6
+-----------
+1.  Remove rest resolved cache.
+2.  Fix assert fail in metadata. (https://github.com/dotnet/docfx/issues/741)
+3.  Add new command option: repositoryRoot.
+
+v2.5.4
+-----------
+1.  Fix isssue #719 that assertion failed.
+
+v2.5.3
+-----------
+1.  Update documenation
+2.  Remove debug build option in Release configuration
+
+v2.5.2
+-----------
+1.  Fix error message for invalid file link.
 
 v2.5.1
 -----------
@@ -163,7 +317,7 @@ v1.7
     3. Type parameter description (https://github.com/dotnet/docfx/issues/204)
 3. Cross-reference is now supporting anchor`#` (https://github.com/dotnet/docfx/issues/190)
 4. C# Code snippet now supports referencing source code using a region `#engion` (https://github.com/dotnet/docfx/issues/160)
-5. Support [TOC reference](xref:intro_toc#link-to-another-toc-file-). With this syntax, we can combine multiple TOC files into a single TOC. (https://github.com/dotnet/docfx/issues/161)
+5. Support [TOC reference](xref:intro_toc#link-to-another-toc-file). With this syntax, we can combine multiple TOC files into a single TOC. (https://github.com/dotnet/docfx/issues/161)
 6. Improve user experience when using `docfx.msbuild` in VS IDE
 7. Code refactor:
    1. We improved DocFX project structure in this release. `Microsoft.DocAsCode.EntityModel` namespace is no longer in use. Assemblies are separated into `Microsoft.DocAsCode.Build`,  `Microsoft.DocAsCode.DataContracts`, and  `Microsoft.DocAsCode.Metadata` namespace. All assemblies can be separately referenced through NuGet. In this way, it is much convenient for plugin writers to reference existing data models and utilities.

@@ -5,11 +5,7 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
 {
     using System.Collections.Generic;
 
-    public class BuildOutputs
+    public class BuildOutputs : OSPlatformSensitiveDictionary<string>
     {
-        /// <summary>
-        /// The items of output.
-        /// </summary>
-        public List<BuildOutputItem> Items { get; set; }
     }
 }

@@ -19,6 +19,8 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
 
         private static readonly Regex _azureHtmlMetadataRegex = new Regex(@"^(?: *(\<(properties|tags)\s+[^\>]*\s*\>[^\<]*\<\/\1\>|\<(?:properties|tags)\s+[^>]*\/>)\s*){1,2}(?:\n|$)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+        private static readonly Regex _azureHtmlTitleRegex = new Regex("(\\|+.*)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
         public virtual Regex AzureHtmlMetadataRegex => _azureHtmlMetadataRegex;
 
         public virtual IMarkdownToken TryMatch(IMarkdownParser engine, IMarkdownParsingContext context)
@@ -82,7 +84,14 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                 {
                     if (string.Equals(attribute.Name, "pageTitle", StringComparison.OrdinalIgnoreCase))
                     {
-                        attributes["title"] = attribute.Value;
+                        // Per Azure's request, migration script should remove everything after "|" and put "Microsoft Docs" there for title.
+                        // After migration, the title should always look like "xxxxxxxx | Microsoft Docs" and only one "|" is in title.
+                        var title = attribute.Value;
+                        if (title != null)
+                        {
+                            title = _azureHtmlTitleRegex.Replace(title, match => "| Microsoft Docs");
+                        }
+                        attributes["title"] = title;
                     }
                     else if (string.Equals(attribute.Name, "authors", StringComparison.OrdinalIgnoreCase))
                     {

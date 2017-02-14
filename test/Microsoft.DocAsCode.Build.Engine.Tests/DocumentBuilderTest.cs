@@ -21,7 +21,6 @@ namespace Microsoft.DocAsCode.Build.Engine.Tests
     using Microsoft.DocAsCode.Dfm.MarkdownValidators;
     using Microsoft.DocAsCode.Plugins;
     using Microsoft.DocAsCode.Tests.Common;
-    using Microsoft.DocAsCode.Utility;
 
     [Trait("Owner", "zhyan")]
     [Trait("EntityType", "DocumentBuilder")]
@@ -40,6 +39,14 @@ namespace Microsoft.DocAsCode.Build.Engine.Tests
             _inputFolder = GetRandomFolder();
             _outputFolder = GetRandomFolder();
             _templateFolder = GetRandomFolder();
+            EnvironmentContext.SetBaseDirectory(Directory.GetCurrentDirectory());
+            EnvironmentContext.SetOutputDirectory(_outputFolder);
+        }
+
+        public override void Dispose()
+        {
+            EnvironmentContext.Clean();
+            base.Dispose();
         }
 
         [Fact]
@@ -70,6 +77,9 @@ namespace Microsoft.DocAsCode.Build.Engine.Tests
                     "b:",
                     "  c: e",
                     "---",
+                    "<!-- I'm comment -->",
+                    "<!-- I'm not title-->",
+                    "<!-- Raw title is in the line below -->",
                     "# Hello World",
                     "Test XRef: @XRef1",
                     "Test link: [link text](test/test.md)",
@@ -83,6 +93,12 @@ namespace Microsoft.DocAsCode.Build.Engine.Tests
                     "Test encoded autolink style xref with anchor: <xref:%58%52%65%66%32#anchor>",
                     "Test invalid autolink style xref with anchor: <xref:invalid#anchor>",
                     "Test short xref: @XRef2",
+                    "Test xref with query string: <xref href=\"XRef2?text=Foo%3CT%3E\"/>",
+                    "Test invalid xref with query string: <xref href=\"invalid?alt=Foo%3CT%3E\"/>",
+                    "Test xref with attribute: <xref href=\"XRef2\" text=\"Foo&lt;T&gt;\"/>",
+                    "Test xref with attribute: <xref href=\"XRef2\" name=\"Foo&lt;T&gt;\"/>",
+                    "Test invalid xref with attribute: <xref href=\"invalid\" alt=\"Foo&lt;T&gt;\"/>",
+                    "Test invalid xref with attribute: <xref href=\"invalid\" fullname=\"Foo&lt;T&gt;\"/>",
                     "<p>",
                     "test",
                 },
@@ -178,45 +194,63 @@ tagRules : [
                     Assert.True(File.Exists(Path.Combine(_outputFolder, Path.ChangeExtension(conceptualFile, RawModelFileExtension))));
                     var model = JsonUtility.Deserialize<Dictionary<string, object>>(Path.Combine(_outputFolder, Path.ChangeExtension(conceptualFile, RawModelFileExtension)));
                     Assert.Equal(
-                        $"<h1 id=\"hello-world\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"7\" sourceendlinenumber=\"7\">Hello World</h1>",
+                        $"<h1 id=\"hello-world\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"10\" sourceendlinenumber=\"10\">Hello World</h1>",
                         model["rawTitle"]);
                     Assert.Equal(
                         string.Join(
                             "\n",
+                            "<!-- I'm comment -->",
+                            "<!-- I'm not title-->",
+                            "<!-- Raw title is in the line below -->",
                             "",
-                            $"<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"8\" sourceendlinenumber=\"19\">Test XRef: <xref href=\"XRef1\" data-throw-if-not-resolved=\"False\" data-raw=\"@XRef1\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"8\" sourceendlinenumber=\"8\"></xref>",
-                            $"Test link: <a href=\"~/{_inputFolder}/test/test.md\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"9\" sourceendlinenumber=\"9\">link text</a>",
-                            $"Test link: <a href=\"~/{resourceFile}\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"10\" sourceendlinenumber=\"10\">link text 2</a>",
-                            $"Test link style xref: <a href=\"xref:XRef2\" title=\"title\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"11\" sourceendlinenumber=\"11\">link text 3</a>",
-                            $"Test link style xref with anchor: <a href=\"xref:XRef2#anchor\" title=\"title\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"12\" sourceendlinenumber=\"12\">link text 4</a>",
-                            $"Test encoded link style xref with anchor: <a href=\"xref:%58%52%65%66%32#anchor\" title=\"title\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"13\" sourceendlinenumber=\"13\">link text 5</a>",
-                            $"Test invalid link style xref with anchor: <a href=\"xref:invalid#anchor\" title=\"title\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"14\" sourceendlinenumber=\"14\">link text 6</a>",
-                            $"Test autolink style xref: <xref href=\"XRef2\" data-throw-if-not-resolved=\"True\" data-raw=\"&lt;xref:XRef2&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"15\" sourceendlinenumber=\"15\"></xref>",
-                            $"Test autolink style xref with anchor: <xref href=\"XRef2#anchor\" data-throw-if-not-resolved=\"True\" data-raw=\"&lt;xref:XRef2#anchor&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"16\" sourceendlinenumber=\"16\"></xref>",
-                            $"Test encoded autolink style xref with anchor: <xref href=\"%58%52%65%66%32#anchor\" data-throw-if-not-resolved=\"True\" data-raw=\"&lt;xref:%58%52%65%66%32#anchor&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"17\" sourceendlinenumber=\"17\"></xref>",
-                            $"Test invalid autolink style xref with anchor: <xref href=\"invalid#anchor\" data-throw-if-not-resolved=\"True\" data-raw=\"&lt;xref:invalid#anchor&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"18\" sourceendlinenumber=\"18\"></xref>",
-                            $"Test short xref: <xref href=\"XRef2\" data-throw-if-not-resolved=\"False\" data-raw=\"@XRef2\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"19\" sourceendlinenumber=\"19\"></xref></p>",
-                            $"<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"20\" sourceendlinenumber=\"21\"><p>",
+                            $"<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"11\" sourceendlinenumber=\"30\">Test XRef: <xref href=\"XRef1\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@XRef1\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"11\" sourceendlinenumber=\"11\"></xref>",
+                            $"Test link: <a href=\"~/{_inputFolder}/test/test.md\" data-raw-source=\"[link text](test/test.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"12\" sourceendlinenumber=\"12\">link text</a>",
+                            $"Test link: <a href=\"~/{resourceFile}\" data-raw-source=\"[link text 2](../Microsoft.DocAsCode.Build.Engine.Tests.dll)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"13\" sourceendlinenumber=\"13\">link text 2</a>",
+                            $"Test link style xref: <a href=\"xref:XRef2\" title=\"title\" data-raw-source=\"[link text 3](xref:XRef2 &quot;title&quot;)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"14\" sourceendlinenumber=\"14\">link text 3</a>",
+                            $"Test link style xref with anchor: <a href=\"xref:XRef2#anchor\" title=\"title\" data-raw-source=\"[link text 4](xref:XRef2#anchor &quot;title&quot;)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"15\" sourceendlinenumber=\"15\">link text 4</a>",
+                            $"Test encoded link style xref with anchor: <a href=\"xref:%58%52%65%66%32#anchor\" title=\"title\" data-raw-source=\"[link text 5](xref:%58%52%65%66%32#anchor &quot;title&quot;)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"16\" sourceendlinenumber=\"16\">link text 5</a>",
+                            $"Test invalid link style xref with anchor: <a href=\"xref:invalid#anchor\" title=\"title\" data-raw-source=\"[link text 6](xref:invalid#anchor &quot;title&quot;)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"17\" sourceendlinenumber=\"17\">link text 6</a>",
+                            $"Test autolink style xref: <xref href=\"XRef2\" data-throw-if-not-resolved=\"True\" data-raw-source=\"&lt;xref:XRef2&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"18\" sourceendlinenumber=\"18\"></xref>",
+                            $"Test autolink style xref with anchor: <xref href=\"XRef2#anchor\" data-throw-if-not-resolved=\"True\" data-raw-source=\"&lt;xref:XRef2#anchor&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"19\" sourceendlinenumber=\"19\"></xref>",
+                            $"Test encoded autolink style xref with anchor: <xref href=\"%58%52%65%66%32#anchor\" data-throw-if-not-resolved=\"True\" data-raw-source=\"&lt;xref:%58%52%65%66%32#anchor&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"20\" sourceendlinenumber=\"20\"></xref>",
+                            $"Test invalid autolink style xref with anchor: <xref href=\"invalid#anchor\" data-throw-if-not-resolved=\"True\" data-raw-source=\"&lt;xref:invalid#anchor&gt;\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"21\" sourceendlinenumber=\"21\"></xref>",
+                            $"Test short xref: <xref href=\"XRef2\" data-throw-if-not-resolved=\"False\" data-raw-source=\"@XRef2\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"22\" sourceendlinenumber=\"22\"></xref>",
+                            "Test xref with query string: <xref href=\"XRef2?text=Foo%3CT%3E\"></xref>",
+                            "Test invalid xref with query string: <xref href=\"invalid?alt=Foo%3CT%3E\"></xref>",
+                            "Test xref with attribute: <xref href=\"XRef2\" text=\"Foo&lt;T&gt;\"></xref>",
+                            "Test xref with attribute: <xref href=\"XRef2\" name=\"Foo&lt;T&gt;\"></xref>",
+                            "Test invalid xref with attribute: <xref href=\"invalid\" alt=\"Foo&lt;T&gt;\"></xref>",
+                            "Test invalid xref with attribute: <xref href=\"invalid\" fullname=\"Foo&lt;T&gt;\"></xref>",
+                            "<p>",
                             "test</p>",
                             ""),
                         model[Constants.PropertyName.Conceptual]);
                     Assert.Equal(
                         string.Join(
                             "\n",
+                            "<!-- I'm comment -->",
+                            "<!-- I'm not title-->",
+                            "<!-- Raw title is in the line below -->",
                             "",
-                            $"<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"8\" sourceendlinenumber=\"19\">Test XRef: <a class=\"xref\" href=\"test.html#XRef1\">Hello World</a>",
-                            $"Test link: <a href=\"test/test.html\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"9\" sourceendlinenumber=\"9\">link text</a>",
-                            $"Test link: <a href=\"../Microsoft.DocAsCode.Build.Engine.Tests.dll\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"10\" sourceendlinenumber=\"10\">link text 2</a>",
-                            "Test link style xref: <a class=\"xref\" href=\"test/test.html#XRef2\" title=\"title\">link text 3</a>",
+                            "<p>Test XRef: <a class=\"xref\" href=\"test.html\">Hello World</a>",
+                            "Test link: <a href=\"test/test.html\">link text</a>",
+                            "Test link: <a href=\"../Microsoft.DocAsCode.Build.Engine.Tests.dll\">link text 2</a>",
+                            "Test link style xref: <a class=\"xref\" href=\"test/test.html\" title=\"title\">link text 3</a>",
                             "Test link style xref with anchor: <a class=\"xref\" href=\"test/test.html#anchor\" title=\"title\">link text 4</a>",
                             "Test encoded link style xref with anchor: <a class=\"xref\" href=\"test/test.html#anchor\" title=\"title\">link text 5</a>",
-                            $"Test invalid link style xref with anchor: <a href=\"xref:invalid#anchor\" title=\"title\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"14\" sourceendlinenumber=\"14\">link text 6</a>",
-                            "Test autolink style xref: <a class=\"xref\" href=\"test/test.html#XRef2\">Hello World</a>",
+                            "Test invalid link style xref with anchor: <a href=\"xref:invalid#anchor\" title=\"title\">link text 6</a>",
+                            "Test autolink style xref: <a class=\"xref\" href=\"test/test.html\">Hello World</a>",
                             "Test autolink style xref with anchor: <a class=\"xref\" href=\"test/test.html#anchor\">Hello World</a>",
                             "Test encoded autolink style xref with anchor: <a class=\"xref\" href=\"test/test.html#anchor\">Hello World</a>",
                             "Test invalid autolink style xref with anchor: &lt;xref:invalid#anchor&gt;",
-                            "Test short xref: <a class=\"xref\" href=\"test/test.html#XRef2\">Hello World</a></p>",
-                            $"<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"20\" sourceendlinenumber=\"21\"><p>",
+                            "Test short xref: <a class=\"xref\" href=\"test/test.html\">Hello World</a>",
+                            "Test xref with query string: <a class=\"xref\" href=\"test/test.html\">Foo&lt;T&gt;</a>",
+                            "Test invalid xref with query string: <span class=\"xref\">Foo&lt;T&gt;</span>",
+                            "Test xref with attribute: <a class=\"xref\" href=\"test/test.html\">Foo&lt;T&gt;</a>",
+                            "Test xref with attribute: <a class=\"xref\" href=\"test/test.html\">Foo&lt;T&gt;</a>",
+                            "Test invalid xref with attribute: <span class=\"xref\">Foo&lt;T&gt;</span>",
+                            "Test invalid xref with attribute: <span class=\"xref\">Foo&lt;T&gt;</span>",
+                            "<p>",
                             "test</p>",
                             ""),
                         File.ReadAllText(conceptualOutputPath));
@@ -534,9 +568,20 @@ exports.getOptions = function (){
                     ["_path"] = $"{_inputFolder}/test.html",
                     ["_tocRel"] = "toc",
                     ["_tocKey"] = $"~/{_inputFolder}/toc.md",
-                    ["conceptual"] = $"\n<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"5\" sourceendlinenumber=\"6\">Test link: <a href=\"~/{_inputFolder}/test/test.md\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"5\" sourceendlinenumber=\"5\">link text</a>\ntest</p>\n",
+                    ["_systemKeys"] = new [] {
+                        "conceptual",
+                        "type",
+                        "source",
+                        "path",
+                        "documentation",
+                        "title",
+                        "rawTitle",
+                        "wordCount"
+                    },
+                    ["conceptual"] = $"\n<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"5\" sourceendlinenumber=\"6\">Test link: <a href=\"~/{_inputFolder}/test/test.md\" data-raw-source=\"[link text](test/test.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"5\" sourceendlinenumber=\"5\">link text</a>\ntest</p>\n",
                     ["type"] = "Conceptual",
                     ["source"] = model["source"], // reuse model's source, not testing this
+                    ["documentation"] = model["source"],
                     ["path"] = $"{_inputFolder}/test.md",
                     ["meta"] = "Hello world!",
                     ["title"] = "Hello World",
@@ -588,6 +633,176 @@ exports.getOptions = function (){
             }
         }
 
+        [Fact]
+        public void TestBuildWithInvalidPath()
+        {
+            #region Prepare test data
+            var resourceFile = Path.GetFileName(typeof(DocumentBuilderTest).Assembly.Location);
+            var resourceMetaFile = resourceFile + ".meta";
+
+            CreateFile("conceptual.html.primary.tmpl", "{{{conceptual}}}", _templateFolder);
+
+            var tocFile = CreateFile("toc.md",
+                new[]
+                {
+                    "# [test1](test.md)",
+                    "## [test2](test/test.md)",
+                },
+                _inputFolder);
+            var conceptualFile = CreateFile("test.md",
+                new[]
+                {
+                    "# Hello World",
+                    "Test link: [link 1](test/test.md)",
+                    "Test link: [link 2](http://www.microsoft.com)",
+                    "Test link: [link 3](a b c.md)",
+                    "Test link: [link 4](c:\\a.md)",
+                    "Test link: [link 5](\\a.md)",
+                    "Test link: [link 6](urn:a.md)",
+                    "Test link: [link 7](bad urn:a.md)",
+                    "Test link: [link 8](test/test.md#top)",
+                    "Test link: [link 9](a.md#top)",
+                    "Test link: [link 10](#top)",
+                },
+                _inputFolder);
+            var conceptualFile2 = CreateFile("test/test.md",
+                new[]
+                {
+                    "# Hello World",
+                    "Test link: [link 1](../test.md)",
+                },
+                _inputFolder);
+
+            FileCollection files = new FileCollection(Directory.GetCurrentDirectory());
+            files.Add(DocumentType.Article, new[] { tocFile, conceptualFile, conceptualFile2 });
+            #endregion
+
+            try
+            {
+                using (new LoggerPhaseScope(nameof(DocumentBuilderTest)))
+                {
+                    BuildDocument(
+                        files,
+                        new Dictionary<string, object>
+                        {
+                            ["meta"] = "Hello world!",
+                        },
+                        templateFolder: _templateFolder);
+
+                }
+
+                {
+                    // check toc.
+                    Assert.True(File.Exists(Path.Combine(_outputFolder, Path.ChangeExtension(tocFile, RawModelFileExtension))));
+                    var model = JsonUtility.Deserialize<TocItemViewModel>(Path.Combine(_outputFolder, Path.ChangeExtension(tocFile, RawModelFileExtension))).Items;
+                    Assert.NotNull(model);
+                    Assert.Equal("test1", model[0].Name);
+                    Assert.Equal("test.html", model[0].Href);
+                    Assert.NotNull(model[0].Items);
+                    Assert.Equal("test2", model[0].Items[0].Name);
+                    Assert.Equal("test/test.html", model[0].Items[0].Href);
+                }
+
+                {
+                    // check conceptual.
+                    var conceptualOutputPath = Path.Combine(_outputFolder, Path.ChangeExtension(conceptualFile, ".html"));
+                    Assert.True(File.Exists(conceptualOutputPath));
+                    Assert.True(File.Exists(Path.Combine(_outputFolder, Path.ChangeExtension(conceptualFile, RawModelFileExtension))));
+                    var model = JsonUtility.Deserialize<Dictionary<string, object>>(Path.Combine(_outputFolder, Path.ChangeExtension(conceptualFile, RawModelFileExtension)));
+                    Assert.Equal(
+                        $"<h1 id=\"hello-world\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"1\" sourceendlinenumber=\"1\">Hello World</h1>",
+                        model["rawTitle"]);
+                    Assert.Equal(
+                        string.Join(
+                            "\n",
+                            "",
+                            $"<p sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"2\" sourceendlinenumber=\"11\">Test link: <a href=\"~/{_inputFolder}/test/test.md\" data-raw-source=\"[link 1](test/test.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"2\" sourceendlinenumber=\"2\">link 1</a>",
+                            $"Test link: <a href=\"http://www.microsoft.com\" data-raw-source=\"[link 2](http://www.microsoft.com)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"3\" sourceendlinenumber=\"3\">link 2</a>",
+                            $"Test link: <a href=\"a b c.md\" data-raw-source=\"[link 3](a b c.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"4\" sourceendlinenumber=\"4\">link 3</a>",
+                            $"Test link: <a href=\"c:\\a.md\" data-raw-source=\"[link 4](c:\\a.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"5\" sourceendlinenumber=\"5\">link 4</a>",
+                            $"Test link: <a href=\"\\a.md\" data-raw-source=\"[link 5](\\a.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"6\" sourceendlinenumber=\"6\">link 5</a>",
+                            $"Test link: <a href=\"urn:a.md\" data-raw-source=\"[link 6](urn:a.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"7\" sourceendlinenumber=\"7\">link 6</a>",
+                            $"Test link: <a href=\"bad urn:a.md\" data-raw-source=\"[link 7](bad urn:a.md)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"8\" sourceendlinenumber=\"8\">link 7</a>",
+                            $"Test link: <a href=\"~/{_inputFolder}/test/test.md#top\" data-raw-source=\"[link 8](test/test.md#top)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"9\" sourceendlinenumber=\"9\">link 8</a>",
+                            $"Test link: <a href=\"a.md#top\" data-raw-source=\"[link 9](a.md#top)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"10\" sourceendlinenumber=\"10\">link 9</a>",
+                            $"Test link: <a href=\"#top\" data-raw-source=\"[link 10](#top)\" sourcefile=\"{_inputFolder}/test.md\" sourcestartlinenumber=\"11\" sourceendlinenumber=\"11\">link 10</a></p>",
+                            ""),
+                        model[Constants.PropertyName.Conceptual]);
+                    Assert.Equal(
+                        string.Join(
+                            "\n",
+                            "",
+                            "<p>Test link: <a href=\"test/test.html\">link 1</a>",
+                            $"Test link: <a href=\"http://www.microsoft.com\">link 2</a>",
+                            $"Test link: <a href=\"a b c.md\">link 3</a>",
+                            $"Test link: <a href=\"c:\\a.md\">link 4</a>",
+                            $"Test link: <a href=\"\\a.md\">link 5</a>",
+                            $"Test link: <a href=\"urn:a.md\">link 6</a>",
+                            $"Test link: <a href=\"bad urn:a.md\">link 7</a>",
+                            $"Test link: <a href=\"test/test.html#top\">link 8</a>",
+                            $"Test link: <a href=\"a.md#top\">link 9</a>",
+                            $"Test link: <a href=\"#top\">link 10</a></p>",
+                            ""),
+                        File.ReadAllText(conceptualOutputPath));
+                    Assert.Equal("Conceptual", model["type"]);
+                    Assert.Equal("Hello world!", model["meta"]);
+                }
+            }
+            finally
+            {
+            }
+        }
+
+        [Fact]
+        public void TestBuildWithInvalidPathWithTokenAndMapping()
+        {
+            #region Prepare test data
+            CreateFile("conceptual.html.primary.tmpl", "{{{conceptual}}}", _templateFolder);
+
+            var conceptualFile = CreateFile("a/a.md",
+                new[]
+                {
+                    "[link a](invalid-a.md)",
+                    "[link b](../b/invalid-b.md)",
+                    "[!include[](../b/token.md)]",
+                },
+                _inputFolder);
+            var tokenFile = CreateFile("b/token.md",
+                new[]
+                {
+                    "[link a](../a/invalid-a.md)",
+                    "[link b](invalid-b.md)",
+                },
+                _inputFolder);
+
+            FileCollection files = new FileCollection(Directory.GetCurrentDirectory());
+            files.Add(DocumentType.Article, new[] { conceptualFile }, Path.Combine(_inputFolder, "a"), ".");
+            #endregion
+
+            using (new LoggerPhaseScope(nameof(DocumentBuilderTest)))
+            {
+                BuildDocument(
+                    files,
+                    new Dictionary<string, object>(),
+                    templateFolder: _templateFolder);
+            }
+            {
+                // check conceptual.
+                var conceptualOutputPath = Path.Combine(_outputFolder, "a.html");
+                Assert.True(File.Exists(conceptualOutputPath));
+                Assert.True(File.Exists(Path.Combine(_outputFolder, Path.ChangeExtension("a.md", RawModelFileExtension))));
+                Assert.Equal(
+                    string.Join(
+                        "\n",
+                        "<p><a href=\"invalid-a.md\">link a</a>",
+                        "<a href=\"../b/invalid-b.md\">link b</a></p>",
+                        $"<!-- BEGIN INCLUDE: Include content from &quot;{_inputFolder}/b/token.md&quot; --><p><a href=\"invalid-a.md\">link a</a>",
+                        "<a href=\"../b/invalid-b.md\">link b</a></p>",
+                        "<!--END INCLUDE -->"),
+                    File.ReadAllText(conceptualOutputPath));
+            }
+        }
+
         private static void AssertMetadataEqual(object expected, object actual)
         {
             var expectedJObject = JObject.FromObject(expected);
@@ -598,7 +813,7 @@ exports.getOptions = function (){
 
         private void BuildDocument(FileCollection files, Dictionary<string, object> metadata = null, ApplyTemplateSettings applyTemplateSettings = null, string templateFolder = null)
         {
-            using (var builder = new DocumentBuilder(LoadAssemblies(), ImmutableArray<string>.Empty, null, templateFolder))
+            using (var builder = new DocumentBuilder(LoadAssemblies(), ImmutableArray<string>.Empty, null))
             {
                 if (applyTemplateSettings == null)
                 {
@@ -636,32 +851,6 @@ exports.getOptions = function (){
         {
             Logger.UnregisterListener(Listener);
             Listener = null;
-        }
-
-        private string CreateFile(string fileName, string[] lines, string baseFolder)
-        {
-            var dir = Path.GetDirectoryName(fileName);
-            dir = CreateDirectory(dir, baseFolder);
-            var file = Path.Combine(baseFolder, fileName);
-            File.WriteAllLines(file, lines);
-            return file;
-        }
-
-        private string CreateFile(string fileName, string content, string baseFolder)
-        {
-            var dir = Path.GetDirectoryName(fileName);
-            dir = CreateDirectory(dir, baseFolder);
-            var file = Path.Combine(baseFolder, fileName);
-            File.WriteAllText(file, content);
-            return file;
-        }
-
-        private string CreateDirectory(string dir, string baseFolder)
-        {
-            if (string.IsNullOrEmpty(dir)) return string.Empty;
-            var subDirectory = Path.Combine(baseFolder, dir);
-            Directory.CreateDirectory(subDirectory);
-            return subDirectory;
         }
     }
 }

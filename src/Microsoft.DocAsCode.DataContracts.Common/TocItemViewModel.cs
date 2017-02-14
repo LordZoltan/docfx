@@ -11,6 +11,7 @@ namespace Microsoft.DocAsCode.DataContracts.Common
     using YamlDotNet.Serialization;
 
     using Microsoft.DocAsCode.YamlSerialization;
+    using DocAsCode.Common;
 
     [Serializable]
     public class TocItemViewModel
@@ -19,11 +20,16 @@ namespace Microsoft.DocAsCode.DataContracts.Common
         [JsonProperty(Constants.PropertyName.Uid)]
         public string Uid { get; set; }
 
-        [YamlMember(Alias = "name")]
-        [JsonProperty("name")]
+        [YamlMember(Alias = Constants.PropertyName.Name)]
+        [JsonProperty(Constants.PropertyName.Name)]
         public string Name { get; set; }
 
-        [ExtensibleMember("name.")]
+        [YamlMember(Alias = Constants.PropertyName.DisplayName)]
+        [JsonProperty(Constants.PropertyName.DisplayName)]
+        public string DisplayName { get; set; }
+
+
+        [ExtensibleMember(Constants.ExtensionMemberPrefix.Name)]
         [JsonIgnore]
         public SortedList<string, string> NameInDevLangs { get; } = new SortedList<string, string>();
 
@@ -34,10 +40,10 @@ namespace Microsoft.DocAsCode.DataContracts.Common
             get
             {
                 string result;
-                NameInDevLangs.TryGetValue("csharp", out result);
+                NameInDevLangs.TryGetValue(Constants.DevLang.CSharp, out result);
                 return result;
             }
-            set { NameInDevLangs["csharp"] = value; }
+            set { NameInDevLangs[Constants.DevLang.CSharp] = value; }
         }
 
         [YamlIgnore]
@@ -47,10 +53,10 @@ namespace Microsoft.DocAsCode.DataContracts.Common
             get
             {
                 string result;
-                NameInDevLangs.TryGetValue("vb", out result);
+                NameInDevLangs.TryGetValue(Constants.DevLang.VB, out result);
                 return result;
             }
-            set { NameInDevLangs["vb"] = value; }
+            set { NameInDevLangs[Constants.DevLang.VB] = value; }
         }
 
         [YamlMember(Alias = Constants.PropertyName.Href)]
@@ -61,16 +67,16 @@ namespace Microsoft.DocAsCode.DataContracts.Common
         [JsonIgnore]
         public string OriginalHref { get; set; }
 
-        [YamlMember(Alias = "tocHref")]
-        [JsonProperty("tocHref")]
+        [YamlMember(Alias = Constants.PropertyName.TocHref)]
+        [JsonProperty(Constants.PropertyName.TocHref)]
         public string TocHref { get; set; }
 
         [YamlIgnore]
         [JsonIgnore]
         public string OriginalTocHref { get; set; }
 
-        [YamlMember(Alias = "topicHref")]
-        [JsonProperty("topicHref")]
+        [YamlMember(Alias = Constants.PropertyName.TopicHref)]
+        [JsonProperty(Constants.PropertyName.TopicHref)]
         public string TopicHref { get; set; }
 
         [YamlIgnore]
@@ -93,8 +99,8 @@ namespace Microsoft.DocAsCode.DataContracts.Common
         [JsonProperty("homepageUid")]
         public string HomepageUid { get; set; }
 
-        [YamlMember(Alias = "topicUid")]
-        [JsonProperty("topicUid")]
+        [YamlMember(Alias = Constants.PropertyName.TopicUid)]
+        [JsonProperty(Constants.PropertyName.TopicUid)]
         public string TopicUid { get; set; }
 
         [YamlIgnore]
@@ -111,27 +117,16 @@ namespace Microsoft.DocAsCode.DataContracts.Common
 
         [ExtensibleMember]
         [JsonIgnore]
-        public Dictionary<string, object> Additional { get; set; } = new Dictionary<string, object>();
+        public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
 
         [EditorBrowsable(EditorBrowsableState.Never)]
         [YamlIgnore]
-        [JsonExtensionData(ReadData = false, WriteData = true)]
-        public Dictionary<string, object> AdditionalJson
-        {
-            get
-            {
-                var dict = new Dictionary<string, object>();
-                foreach (var item in NameInDevLangs)
-                {
-                    dict["name." + item.Key] = item.Value;
-                }
-                foreach (var item in Additional)
-                {
-                    dict[item.Key] = item.Value;
-                }
-                return dict;
-            }
-            set { }
-        }
+        [JsonExtensionData]
+        public CompositeDictionary MetadataJson =>
+            CompositeDictionary
+                .CreateBuilder()
+                .Add(Constants.ExtensionMemberPrefix.Name, NameInDevLangs, JTokenConverter.Convert<string>)
+                .Add(string.Empty, Metadata)
+                .Create();
     }
 }

@@ -3,6 +3,7 @@
 
 namespace Microsoft.DocAsCode.Dfm
 {
+    using System;
     using System.Collections.Immutable;
     using System.Text.RegularExpressions;
 
@@ -23,13 +24,17 @@ namespace Microsoft.DocAsCode.Dfm
     {
         public static readonly string XrefShortcutRegexWithQuoteString = @"@(?:(['""])(\s*?\S+?[\s\S]*?)\1)";
         public static readonly string XrefShortcutRegexString = @"@((?:([a-z]+?[\S]*?))(?=[.,;:!?~\s]{2,}|[.,;:!?~]*$|\s))";
-        private static readonly Regex XrefShortcutRegexWithQuote = new Regex("^" + XrefShortcutRegexWithQuoteString, RegexOptions.Compiled);
-        private static readonly Regex XrefShortcutRegex = new Regex("^" + XrefShortcutRegexString, RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex XrefShortcutRegexWithQuote = new Regex("^" + XrefShortcutRegexWithQuoteString, RegexOptions.Compiled, TimeSpan.FromSeconds(10));
+        private static readonly Regex XrefShortcutRegex = new Regex("^" + XrefShortcutRegexString, RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromSeconds(10));
 
         public string Name => "DfmXrefShortcut";
 
         public IMarkdownToken TryMatch(IMarkdownParser parser, IMarkdownParsingContext context)
         {
+            if (MarkdownInlineContext.GetIsInLink(parser.Context))
+            {
+                return null;
+            }
             var match = XrefShortcutRegexWithQuote.Match(context.CurrentMarkdown);
             if (match.Length == 0)
             {

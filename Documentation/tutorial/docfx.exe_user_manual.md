@@ -16,7 +16,7 @@ Doc-as-code: `docfx.exe` User Manual
 
     a. Visualize language metadata, with extra **content** provided by linked conceptual files using syntax described in [Section 3. Work with Metadata in Markdown](../spec/metadata_format_spec.md).
 
-    b. Organize and render available conceptual files. It can be easily cross-referenced with language metadata pages. We support **Docfx Flavored Markdown(DFM)** for writing conceptual files. DFM is **100%** compatible with *Github Flavored Markdown(GFM)* and add several new features including *file inclusion*, *cross reference*, and *yaml header*. For detailed description about DFM, please refer to [DFM](../spec/docfx_flavored_markdown.md).
+    b. Organize and render available conceptual files. It can be easily cross-referenced with language metadata pages. We support **Docfx Flavored Markdown(DFM)** for writing conceptual files. **DFM** supports all *Github Flavored Markdown(GFM)* syntax with 2 exceptions when resolving [list](../spec/docfx_flavored_markdown.md#differences-between-dfm-and-gfm). It also adds several new features including *file inclusion*, *cross reference*, and *yaml header*. For detailed description about DFM, please refer to [DFM](../spec/docfx_flavored_markdown.md).
 
 Currently generating documentations to a *client only* **website** is supported. The generated **website** can be easily published to whatever platform such as *Github Pages* and *Azure Website* with no extra effort.
 
@@ -77,6 +77,12 @@ Files can be combined using `,` as separator and *search pattern*.
 
 The default output folder is `_site/` folder if it is not specified in `docfx.json` under current directory.
 
+####2.2.2 Command option `--shouldSkipMarkup`
+
+If adding option `--shouldSkipMarkup` in metadata command, it means that DocFX would not render triple-slash-comments in source code as markdown.
+
+e.g. `docfx metadata --shouldSkipMarkup`
+
 ###2.3 Generate documentation command `docfx build`
 **Syntax**
 ```
@@ -86,7 +92,9 @@ docfx build [-o:<output_path>] [-t:<template folder>]
 
 If `toc.yml` or `toc.md` is found in current folder, it will be rendered as the top level TABLE-OF-CONTENT. As in website, it will be rendered as the top navigation bar.
 
-**NOTE** that `homepage` is not supported in `toc.md`. And if `href` is referencing to a **folder**, it must end with `/`.
+> [!Note]
+> Please note that `homepage` is not supported in `toc.md`.
+> And if `href` is referencing to a **folder**, it must end with `/`.
 
 **toc.yml syntax**
 `toc.yml` is an array of items. Each item can have following properties:
@@ -144,6 +152,15 @@ Top level `docfx.json` structure is key-value pair. `key` is the name of the sub
 
 `Metadata` section defines an array of source projects and their output folder. Each item has `src` and `dest` property. `src` defines the source projects to have metadata generated, which is in `File Mapping Format`. Detailed syntax is described in **4. Supported `name-files` File Mapping Format** below. `dest` defines the output folder of the generated metadata files.
 
+Key                      | Description
+-------------------------|-----------------------------
+src                      | Defines the source projects to have metadata generated, which is in `File Mapping Format`.
+dest                     | Defines the output folder of the generated metadata files.
+force                    | If set to true, it would disable incremental build.
+shouldSkipMarkup         | If set to true, DocFX would not render triple-slash-comments in source code as markdown.
+filter                   | Defines the filter configuration file, please go to [How to filter out unwanted apis attributes](./howto_filter_out_unwanted_apis_attributes.md) for more details.
+useCompatibilityFileName | If set to true, DocFX would keep `` ` `` in comment id instead of replacing it with `-`.
+
 **Sample**
 ```json
 {
@@ -156,7 +173,8 @@ Top level `docfx.json` structure is key-value pair. `key` is the name of the sub
           "src": "../src"
         }
       ],
-      "dest": "obj/docfx/api/dotnet"
+      "dest": "obj/docfx/api/dotnet",
+      "shouldSkipMarkup": true
     },
     {
       "src": [
@@ -165,7 +183,8 @@ Top level `docfx.json` structure is key-value pair. `key` is the name of the sub
           "src": "../src"
         }
       ],
-      "dest": "obj/docfx/api/js" 
+      "dest": "obj/docfx/api/js",
+      "useCompatibilityFileName": true
     }
   ]
 }
@@ -236,7 +255,12 @@ To use a custom template, one way is to specify template path with `--template` 
 }
 ```
 
->The template path could either be a zip file called `<template>.zip` or a folder called `<template>`.
+> [!Note]
+> The template path could either be a zip file called `<template>.zip` or a folder called `<template>`.
+
+> [!Warning]
+> DocFX has embedded templates: `default`, `iframe.html`, `statictoc` and `common`.
+> Please avoid using these as template folder name.
 
 To custom theme, one way is to specify theme name with `--theme` command option, multiple themes must be separated by `,` with no spaces. The other way is to set key-value mapping in `docfx.json` as similar to defining template. Also, both `.zip` file and folder are supported.
 
@@ -285,7 +309,10 @@ Metadata Name         | Type    | Description
 ----------------------|---------|---------------------------
 _appTitle             | string  | Will be appended to each output page's head title.
 _appFooter            | string  | The footer text. Will show DocFX's Copyright text if not specified.
+_appLogoPath          | string  | Logo file's path from output root. Will show DocFX's logo if not specified. Remember to add file to resource.
+_appFaviconPath       | string  | Favicon file's path from output root. Will show DocFX's favicon if not specified. Remember to add file to resource.
 _enableSearch         | bool    | Indicate whether to show the search box on the top of page.
+_enableNewTab         | bool    | Indicate whether to open a new tab when clicking an external link. (internal link always shows within the current tab)
 _disableNavbar        | bool    | Indicate whether to show the navigation bar on the top of page.
 _disableBreadcrumb    | bool    | Indicate whether to show breadcrumb on the top of page.
 _disableToc           | bool    | Indicate whether to show table of contents on the left of page.

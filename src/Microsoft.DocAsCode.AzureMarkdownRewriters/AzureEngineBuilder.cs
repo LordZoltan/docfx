@@ -14,7 +14,6 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
     using Microsoft.DocAsCode.Dfm;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
-    using Microsoft.DocAsCode.Utility;
 
     public class AzureEngineBuilder : GfmEngineBuilder
     {
@@ -60,9 +59,6 @@ namespace Microsoft.DocAsCode.AzureMarkdownRewriters
                 throw new ArgumentException($"{nameof(MarkdownHtmlBlockRule)} should exist and shouldn't be the first one rule!");
             }
             blockRules.Insert(index - 1, new AzureHtmlMetadataBlockRule());
-
-            var gfmIndex = blockRules.FindIndex(item => item is GfmParagraphBlockRule);
-            blockRules[gfmIndex] = new AzureParagraphBlockRule();
 
             var markdownBlockQuoteIndex = blockRules.FindIndex(item => item is MarkdownBlockquoteBlockRule);
             blockRules[markdownBlockQuoteIndex] = new AzureBlockquoteBlockRule();

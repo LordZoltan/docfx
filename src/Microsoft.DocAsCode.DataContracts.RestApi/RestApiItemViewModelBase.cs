@@ -9,8 +9,8 @@ namespace Microsoft.DocAsCode.DataContracts.RestApi
     using Newtonsoft.Json;
     using YamlDotNet.Serialization;
 
+    using Microsoft.DocAsCode.Common.EntityMergers;
     using Microsoft.DocAsCode.DataContracts.Common;
-    using Microsoft.DocAsCode.Utility.EntityMergers;
     using Microsoft.DocAsCode.YamlSerialization;
 
     [Serializable]
@@ -37,6 +37,10 @@ namespace Microsoft.DocAsCode.DataContracts.RestApi
         [YamlMember(Alias = "description")]
         [JsonProperty("description")]
         public string Description { get; set; }
+
+        [YamlMember(Alias = "remarks")]
+        [JsonProperty("remarks")]
+        public string Remarks { get; set; }
 
         [YamlMember(Alias = "summary")]
         [JsonProperty("summary")]

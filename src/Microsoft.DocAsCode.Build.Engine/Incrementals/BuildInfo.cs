@@ -34,26 +34,56 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
         /// </summary>
         public string TemplateHash { get; set; }
         /// <summary>
+        /// The SHA of the current commit from.
+        /// </summary>
+        public string CommitFromSHA { get; set; }
+        /// <summary>
+        /// The SHA of the current commit to.
+        /// </summary>
+        public string CommitToSHA { get; set; }
+        /// <summary>
         /// The file info for each version.
         /// </summary>
         public List<BuildVersionInfo> Versions { get; } = new List<BuildVersionInfo>();
+        /// <summary>
+        /// The post process information
+        /// </summary>
+        public PostProcessInfo PostProcessInfo { get; set; }
 
         public static BuildInfo Load(string baseDir)
         {
-            var buildInfo = JsonUtility.Deserialize<BuildInfo>(Path.Combine(baseDir, FileName));
-            foreach (var version in buildInfo.Versions)
+            if (baseDir == null || !File.Exists(Path.Combine(baseDir, FileName)))
             {
-                version.Load(Path.Combine(baseDir, buildInfo.DirectoryName));
+                return null;
+            }
+
+            BuildInfo buildInfo;
+            try
+            {
+                buildInfo = JsonUtility.Deserialize<BuildInfo>(Path.Combine(baseDir, FileName));
+                var targetDirectory = Path.Combine(baseDir, buildInfo.DirectoryName);
+                foreach (var version in buildInfo.Versions)
+                {
+                    version.Load(targetDirectory);
+                }
+                buildInfo.PostProcessInfo?.Load(targetDirectory);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogInfo($"Exception occurs when loading build info from '{Path.Combine(baseDir, FileName)}', message: {ex.Message}.");
+                return null;
             }
             return buildInfo;
         }
 
         public void Save(string baseDir)
         {
+            var targetDirectory = Path.Combine(baseDir, DirectoryName);
             foreach (var version in Versions)
             {
-                version.Save(Path.Combine(baseDir, DirectoryName));
+                version.Save(targetDirectory);
             }
+            PostProcessInfo?.Save(targetDirectory);
             JsonUtility.Serialize(Path.Combine(baseDir, FileName), this);
         }
     }

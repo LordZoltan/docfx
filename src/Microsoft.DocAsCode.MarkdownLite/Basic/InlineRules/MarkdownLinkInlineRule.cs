@@ -18,6 +18,10 @@ namespace Microsoft.DocAsCode.MarkdownLite
             {
                 return null;
             }
+            if (MarkdownInlineContext.GetIsInLink(parser.Context) && match.Value[0] != '!')
+            {
+                return null;
+            }
             if (IsEscape(match.Groups[1].Value) || IsEscape(match.Groups[2].Value))
             {
                 return null;

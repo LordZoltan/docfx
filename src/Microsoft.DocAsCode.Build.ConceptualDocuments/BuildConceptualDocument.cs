@@ -10,17 +10,16 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
     using HtmlAgilityPack;
 
     using Microsoft.DocAsCode.Build.Common;
+    using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.MarkdownLite;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     [Export(nameof(ConceptualDocumentProcessor), typeof(IDocumentBuildStep))]
     public class BuildConceptualDocument : BaseDocumentBuildStep, ISupportIncrementalBuildStep
     {
         private const string ConceptualKey = Constants.PropertyName.Conceptual;
         private const string DocumentTypeKey = "documentType";
-        private const int TitleThumbnailMaxLength = 30;
 
         public override string Name => nameof(BuildConceptualDocument);
 
@@ -51,7 +50,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                         var uid = item.Value as string;
                         if (!string.IsNullOrWhiteSpace(uid))
                         {
-                            model.Uids = new[] { new UidDefinition(uid, model.LocalPathFromRepoRoot) }.ToImmutableArray();
+                            model.Uids = new[] { new UidDefinition(uid, model.LocalPathFromRoot) }.ToImmutableArray();
                             content[Constants.PropertyName.Uid] = item.Value;
                         }
                     }
@@ -79,7 +78,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                 model.Properties.XrefSpec = new XRefSpec
                 {
                     Uid = model.Uids[0].Name,
-                    Name = TitleThumbnail(content[Constants.PropertyName.Title] as string ?? model.Uids[0].Name, TitleThumbnailMaxLength),
+                    Name = content[Constants.PropertyName.Title] as string ?? model.Uids[0].Name,
                     Href = ((RelativePath)model.File).GetPathFromWorkingFolder()
                 };
             }
@@ -100,13 +99,6 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
 
         #endregion
 
-        private static string TitleThumbnail(string title, int maxLength)
-        {
-            if (string.IsNullOrEmpty(title)) return null;
-            if (title.Length <= maxLength) return title;
-            return title.Substring(0, maxLength) + "...";
-        }
-
         private static HtmlInfo SeparateHtml(string contentHtml)
         {
             var content = new HtmlInfo();
@@ -119,7 +111,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             var headerNode = document.DocumentNode.SelectSingleNode("//h1|//h2|//h3");
             content.Title = StringHelper.HtmlDecode(headerNode?.InnerText);
 
-            if (headerNode != null && document.DocumentNode.FirstChild == headerNode)
+            if (headerNode != null && GetFirstNoneCommentChild(document.DocumentNode) == headerNode)
             {
                 content.RawTitle = headerNode.OuterHtml;
                 headerNode.Remove();
@@ -132,6 +124,16 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             content.Content = document.DocumentNode.OuterHtml;
 
             return content;
+        }
+
+        private static HtmlNode GetFirstNoneCommentChild(HtmlNode node)
+        {
+            var result = node.FirstChild;
+            while (result != null && (result.NodeType == HtmlNodeType.Comment || string.IsNullOrWhiteSpace(result.OuterHtml)))
+            {
+                result = result.NextSibling;
+            }
+            return result;
         }
 
         private class HtmlInfo

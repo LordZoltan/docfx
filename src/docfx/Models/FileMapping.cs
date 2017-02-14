@@ -51,7 +51,7 @@ namespace Microsoft.DocAsCode
         }
 
         /// <summary>
-        /// Should not merge FileMappingItems even if they are using the same name, because other propertes also matters, e.g. cwd, exclude.
+        /// Should not merge FileMappingItems even if they are using the same name, because other propertes also matters, e.g. src, exclude.
         /// </summary>
         /// <param name="item"></param>
         public void Add(FileMappingItem item)
@@ -59,6 +59,19 @@ namespace Microsoft.DocAsCode
             if (item == null || item.Files == null || item.Files.Count == 0) return;
 
             _items.Add(item);
+        }
+
+        /// <summary>
+        /// The RootTocPath of the current version, specified in FileMappingItems.
+        /// If different FileMappingItems in same version have different RootTocPath, the behavior is undetermined.
+        /// </summary>
+        public string RootTocPath
+        {
+            get
+            {
+                var fileMappingItem = _items.Find(i => !string.IsNullOrEmpty(i.RootTocPath));
+                return fileMappingItem?.RootTocPath;
+            }
         }
     }
 }

@@ -8,16 +8,8 @@ namespace Microsoft.DocAsCode.Build.Engine.Incrementals
 
     using Newtonsoft.Json;
 
-    public class ProcessorInfo
+    public class ProcessorInfo : ProcessorInfoBase
     {
-        /// <summary>
-        /// The name of processor.
-        /// </summary>
-        public string Name { get; set; }
-        /// <summary>
-        /// The context hash for incremental.
-        /// </summary>
-        public string IncrementalContextHash { get; set; }
         /// <summary>
         /// The information for steps.
         /// </summary>

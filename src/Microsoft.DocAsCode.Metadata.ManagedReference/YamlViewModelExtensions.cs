@@ -244,10 +244,11 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 Examples = model.Examples,
                 Syntax = model.Syntax.ToSyntaxDetailViewModel(),
                 Overridden = model.Overridden,
+                Overload = model.Overload,
                 Exceptions = model.Exceptions,
                 Sees = model.Sees,
                 SeeAlsos = model.SeeAlsos,
-                
+                DerivedClasses = model.DerivedClasses,
                 Inheritance = model.Inheritance,
                 Implements = model.Implements,
                 InheritedMembers = model.InheritedMembers,

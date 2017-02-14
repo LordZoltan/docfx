@@ -8,6 +8,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
     using System.Collections.Immutable;
     using System.IO;
     using System.Reflection;
+    using System.Web;
 
     using Xunit;
 
@@ -16,7 +17,6 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
     using Microsoft.DocAsCode.Tests.Common;
 
     [Trait("Owner", "lianwei")]
@@ -40,6 +40,47 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             _applyTemplateSettings = new ApplyTemplateSettings(_inputFolder, _outputFolder);
             _applyTemplateSettings.RawModelExportSettings.Export = true;
             _fileCreator = new FileCreator(_inputFolder);
+            EnvironmentContext.SetBaseDirectory(_inputFolder);
+            EnvironmentContext.SetOutputDirectory(_outputFolder);
+        }
+
+        public override void Dispose()
+        {
+            EnvironmentContext.Clean();
+            base.Dispose();
+        }
+
+        [Fact]
+        public void ProcessMarkdownTocWithComplexHrefShouldSucceed()
+        {
+            var fileName = "#ctor";
+            var href = HttpUtility.UrlEncode(fileName);
+            var content = $@"
+#[Constructor]({href}.md)
+";
+            var file = _fileCreator.CreateFile(string.Empty, FileType.MarkdownContent, fileNameWithoutExtension: fileName);
+            var toc = _fileCreator.CreateFile(content, FileType.MarkdownToc);
+            FileCollection files = new FileCollection(_inputFolder);
+            files.Add(DocumentType.Article, new[] { toc, file });
+            BuildDocument(files);
+
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension)));
+            Assert.True(File.Exists(outputRawModelPath));
+            var model = JsonUtility.Deserialize<TocItemViewModel>(outputRawModelPath);
+            var expectedModel = new TocItemViewModel
+            {
+                Items = new TocViewModel
+                {
+                    new TocItemViewModel
+                    {
+                        Name = "Constructor",
+                        Href = $"{href}.md",
+                        TopicHref = $"{href}.md",
+                    }
+                }
+            };
+
+            AssertTocEqual(expectedModel, model);
         }
 
         [Fact]
@@ -57,7 +98,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             files.Add(DocumentType.Article, new[] { toc });
             BuildDocument(files);
 
-            var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension));
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension)));
             Assert.True(File.Exists(outputRawModelPath));
             var model = JsonUtility.Deserialize<TocItemViewModel>(outputRawModelPath);
             var expectedModel = new TocItemViewModel
@@ -121,7 +162,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             FileCollection files = new FileCollection(_inputFolder);
             files.Add(DocumentType.Article, new[] { file1, file2, toc });
             BuildDocument(files);
-            var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension));
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension)));
             Assert.True(File.Exists(outputRawModelPath));
             var model = JsonUtility.Deserialize<TocItemViewModel>(outputRawModelPath);
             var expectedModel = new TocItemViewModel
@@ -201,7 +242,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             FileCollection files = new FileCollection(_inputFolder);
             files.Add(DocumentType.Article, new[] { file1, file2, toc, subToc });
             BuildDocument(files);
-            var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension));
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension)));
             Assert.True(File.Exists(outputRawModelPath));
             var model = JsonUtility.Deserialize<TocItemViewModel>(outputRawModelPath);
             var expectedModel = new TocItemViewModel
@@ -278,7 +319,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             FileCollection files = new FileCollection(_inputFolder);
             files.Add(DocumentType.Article, new[] { file1, file2, file3, toc, subToc });
             BuildDocument(files);
-            var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension));
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension)));
 
             Assert.True(File.Exists(outputRawModelPath));
             var model = JsonUtility.Deserialize<TocItemViewModel>(outputRawModelPath);
@@ -395,7 +436,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             FileCollection files = new FileCollection(_inputFolder);
             files.Add(DocumentType.Article, new[] { toc, subToc });
             var e = Assert.Throws<DocumentException>(() => BuildDocument(files));
-            Assert.Equal($"Circular reference to {Path.GetFullPath(Path.Combine(_inputFolder, subToc)).ToDisplayPath()} is found in {Path.GetFullPath(Path.Combine(_inputFolder, referencedToc)).ToDisplayPath()}", e.Message, true);
+            Assert.Equal($"Circular reference to {StringExtension.ToDisplayPath(Path.GetFullPath(Path.Combine(_inputFolder, subToc)))} is found in {StringExtension.ToDisplayPath(Path.GetFullPath(Path.Combine(_inputFolder, referencedToc)))}", e.Message, true);
         }
 
         [Fact]
@@ -426,7 +467,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             FileCollection files = new FileCollection(_inputFolder);
             files.Add(DocumentType.Article, new[] { file1, file2, toc, referencedToc });
             BuildDocument(files);
-            var outputRawModelPath = Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension));
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(toc, RawModelFileExtension)));
 
             Assert.True(File.Exists(outputRawModelPath));
             var model = JsonUtility.Deserialize<TocItemViewModel>(outputRawModelPath);
@@ -476,6 +517,36 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
         }
 
         [Fact]
+        public void RelativePathToTocShouldChooseTheNearestReferenceToc()
+        {
+            // |-toc.md
+            // |-sub1
+            //    |-sub2
+            //       |-file
+            //       |-sub3
+            //           |-toc.md
+
+            // Arrange
+            const string fileFolder = "sub1/sub2";
+            var file = _fileCreator.CreateFile(string.Empty, FileType.MarkdownContent, fileFolder);
+            var toc1 = _fileCreator.CreateFile($"#[Topic]({file})", FileType.MarkdownToc);
+            const string toc2Folder = "sub1/sub2/sub3";
+            var filePathRelativeToToc2 = ((RelativePath)file).MakeRelativeTo((RelativePath)toc2Folder);
+            var toc2 = _fileCreator.CreateFile($"#[Same Topic]({filePathRelativeToToc2.FileName}", FileType.MarkdownToc, toc2Folder);
+            var files = new FileCollection(_inputFolder);
+            files.Add(DocumentType.Article, new[] { file, toc1, toc2 });
+
+            // Act
+            BuildDocument(files);
+
+            // Assert
+            var outputRawModelPath = Path.GetFullPath(Path.Combine(_outputFolder, Path.ChangeExtension(file, RawModelFileExtension)));
+            Assert.True(File.Exists(outputRawModelPath));
+            var model = JsonUtility.Deserialize<Dictionary<string, object>>(outputRawModelPath);
+            Assert.Equal("../../toc.md", model["_tocRel"]);
+        }
+
+        [Fact]
         public void ProcessYamlTocWithTocHrefAndHomepageShouldFail()
         {
 
@@ -511,7 +582,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
                 _rootDir = rootDir ?? Directory.GetCurrentDirectory();
             }
 
-            public string CreateFile(string content, FileType type, string folder = null)
+            public string CreateFile(string content, FileType type, string folder = null, string fileNameWithoutExtension = null)
             {
                 string fileName;
                 switch (type)
@@ -523,7 +594,7 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
                         fileName = YamlTocName;
                         break;
                     case FileType.MarkdownContent:
-                        fileName = Path.GetRandomFileName() + ".md";
+                        fileName = (fileNameWithoutExtension ?? Path.GetRandomFileName()) + ".md";
                         break;
                     default:
                         throw new NotSupportedException(type.ToString());
@@ -564,13 +635,17 @@ namespace Microsoft.DocAsCode.Build.TableOfContents.Tests
             yield return typeof(TocDocumentProcessor).Assembly;
         }
 
-        private static void AssertTocEqual(TocItemViewModel expected, TocItemViewModel actual)
+        private static void AssertTocEqual(TocItemViewModel expected, TocItemViewModel actual, bool noMetadata = true)
         {
             using (var swForExpected = new StringWriter())
             {
                 YamlUtility.Serialize(swForExpected, expected);
                 using (var swForActual = new StringWriter())
                 {
+                    if (noMetadata)
+                    {
+                        actual.Metadata.Clear();
+                    }
                     YamlUtility.Serialize(swForActual, actual);
                     Assert.Equal(swForExpected.ToString(), swForActual.ToString());
                 }

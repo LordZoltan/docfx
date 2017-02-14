@@ -12,10 +12,9 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
     using System.Text;
 
     using Microsoft.DocAsCode.Build.Common;
+    using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
-    using Microsoft.DocAsCode.Common;
 
     using Newtonsoft.Json;
 
@@ -24,7 +23,19 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
         : DisposableDocumentProcessor, ISupportIncrementalDocumentProcessor
     {
         #region Fields
+
         private readonly ResourcePoolManager<JsonSerializer> _serializerPool;
+        private readonly string[] SystemKeys = {
+            "conceptual",
+            "type",
+            "source",
+            "path",
+            "documentation",
+            "title",
+            "rawTitle",
+            "wordCount"
+        };
+
         #endregion
 
         #region Constructors
@@ -62,7 +73,7 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
             {
                 throw new NotSupportedException();
             }
-            var content = MarkdownReader.ReadMarkdownAsConceptual(file.BaseDir, file.File);
+            var content = MarkdownReader.ReadMarkdownAsConceptual(file.File);
             foreach (var item in metadata)
             {
                 if (!content.ContainsKey(item.Key))
@@ -70,16 +81,16 @@ namespace Microsoft.DocAsCode.Build.ConceptualDocuments
                     content[item.Key] = item.Value;
                 }
             }
+            content[Constants.PropertyName.SystemKeys] = SystemKeys;
 
-            var displayLocalPath = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, file.FullPath);
+            var localPathFromRoot = PathUtility.MakeRelativePath(EnvironmentContext.BaseDirectory, EnvironmentContext.FileAbstractLayer.GetPhysicalPath(file.File));
 
             return new FileModel(
                 file,
                 content,
                 serializer: Environment.Is64BitProcess ? null : new BinaryFormatter())
             {
-                LocalPathFromRepoRoot = (content["source"] as SourceDetail)?.Remote?.RelativePath,
-                LocalPathFromRoot = displayLocalPath
+                LocalPathFromRoot = localPathFromRoot,
             };
         }
 

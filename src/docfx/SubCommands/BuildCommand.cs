@@ -11,9 +11,9 @@ namespace Microsoft.DocAsCode.SubCommands
     using Microsoft.DocAsCode;
     using Microsoft.DocAsCode.Build.Engine;
     using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.Common.Git;
     using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     using Newtonsoft.Json;
     using Newtonsoft.Json.Linq;
@@ -34,12 +34,12 @@ namespace Microsoft.DocAsCode.SubCommands
             _version = assembly.GetName().Version.ToString();
             Config = ParseOptions(options);
             SetDefaultConfigValue(Config);
-            EnvironmentContext.BaseDirectory = Path.GetFullPath(string.IsNullOrEmpty(Config.BaseDirectory) ? Directory.GetCurrentDirectory() : Config.BaseDirectory);
             _templateManager = new TemplateManager(assembly, "Template", Config.Templates, Config.Themes, Config.BaseDirectory);
         }
 
         public void Exec(SubCommandRunningContext context)
         {
+            EnvironmentContext.SetBaseDirectory(Path.GetFullPath(string.IsNullOrEmpty(Config.BaseDirectory) ? Directory.GetCurrentDirectory() : Config.BaseDirectory));
             // TODO: remove BaseDirectory from Config, it may cause potential issue when abused
             var baseDirectory = EnvironmentContext.BaseDirectory;
             var intermediateOutputFolder = Path.Combine(baseDirectory, "obj");
@@ -54,6 +54,7 @@ namespace Microsoft.DocAsCode.SubCommands
             {
                 ServeCommand.Serve(outputFolder, Config.Port);
             }
+            EnvironmentContext.Clean();
         }
 
         #region BuildCommand ctor related
@@ -64,7 +65,14 @@ namespace Microsoft.DocAsCode.SubCommands
             {
                 Config.Templates = new ListWithStringFallback { DocAsCode.Constants.DefaultTemplateName };
             }
-            if (config.GlobalMetadata != null || !config.GlobalMetadata.ContainsKey("_docfxVersion"))
+            if (config.GlobalMetadata == null)
+            {
+                config.GlobalMetadata = new Dictionary<string, object>
+                {
+                    ["_docfxVersion"] = _version
+                };
+            }
+            else if (!config.GlobalMetadata.ContainsKey("_docfxVersion"))
             {
                 config.GlobalMetadata["_docfxVersion"] = _version;
             }
@@ -101,7 +109,6 @@ namespace Microsoft.DocAsCode.SubCommands
             config.BaseDirectory = Path.GetDirectoryName(configFile);
 
             MergeOptionsToConfig(options, config);
-            MergeGitContributeToConfig(config);
             return config;
         }
 
@@ -207,6 +214,8 @@ namespace Microsoft.DocAsCode.SubCommands
                 config.Port = options.Port.Value.ToString();
             }
             config.Force |= options.ForceRebuild;
+            // When force to rebuild, should force to post process as well
+            config.ForcePostProcess = config.ForcePostProcess | options.ForcePostProcess | config.Force;
             config.ExportRawModel |= options.ExportRawModel;
             config.ExportViewModel |= options.ExportViewModel;
             if (!string.IsNullOrEmpty(options.RawModelOutputFolder))
@@ -271,40 +280,6 @@ namespace Microsoft.DocAsCode.SubCommands
 
             config.FileMetadata = GetFileMetadataFromOption(config.FileMetadata, options.FileMetadataFilePath, config.FileMetadataFilePaths);
             config.GlobalMetadata = GetGlobalMetadataFromOption(config.GlobalMetadata, options.GlobalMetadataFilePath, config.GlobalMetadataFilePaths, options.GlobalMetadata);
-        }
-
-        private static void MergeGitContributeToConfig(BuildJsonConfig config)
-        {
-            GitDetail repoInfoFromBaseDirectory = GitUtility.GetGitDetail(Path.Combine(Directory.GetCurrentDirectory(), config.BaseDirectory));
-
-            if (repoInfoFromBaseDirectory?.RelativePath != null)
-            {
-                repoInfoFromBaseDirectory.RelativePath = Path.Combine(repoInfoFromBaseDirectory.RelativePath, DocAsCode.Constants.DefaultOverwriteFolderName);
-            }
-            object gitRespositoryOpenToPublicContributors;
-            if (config.GlobalMetadata.TryGetValue("_gitContribute", out gitRespositoryOpenToPublicContributors))
-            {
-                GitDetail repoInfo;
-                try
-                {
-                    repoInfo = JObject.FromObject(gitRespositoryOpenToPublicContributors).ToObject<GitDetail>();
-                }
-                catch (Exception e)
-                {
-                    throw new DocumentException($"Unable to convert _gitContribute to GitDetail in globalMetadata: {e.Message}", e);
-                }
-                if (repoInfoFromBaseDirectory != null)
-                {
-                    if (repoInfo.RelativePath == null) repoInfo.RelativePath = repoInfoFromBaseDirectory.RelativePath;
-                    if (repoInfo.RemoteBranch == null) repoInfo.RemoteBranch = repoInfoFromBaseDirectory.RemoteBranch;
-                    if (repoInfo.RemoteRepositoryUrl == null) repoInfo.RemoteRepositoryUrl = repoInfoFromBaseDirectory.RemoteRepositoryUrl;
-                }
-                config.GlobalMetadata["_gitContribute"] = repoInfo;
-            }
-            else
-            {
-                config.GlobalMetadata["_gitContribute"] = repoInfoFromBaseDirectory;
-            }
         }
 
         internal static Dictionary<string, FileMetadataPairs> GetFileMetadataFromOption(Dictionary<string, FileMetadataPairs> fileMetadataFromConfig, string fileMetadataFilePath, ListWithStringFallback fileMetadataFilePaths)
@@ -507,7 +482,8 @@ namespace Microsoft.DocAsCode.SubCommands
 
                 builderDomain = AppDomain.CreateDomain("document builder domain", null, setup);
                 builderDomain.UnhandledException += (s, e) => { };
-                builderDomain.DoCallBack(new DocumentBuilderWrapper(config, manager, baseDirectory, outputDirectory, pluginDirectory, new CrossAppDomainListener(), templateDirectory).BuildDocument);
+                var wrapper = new DocumentBuilderWrapper(config, manager, baseDirectory, outputDirectory, pluginDirectory, new CrossAppDomainListener(), templateDirectory);
+                builderDomain.DoCallBack(wrapper.BuildDocument);
             }
             finally
             {

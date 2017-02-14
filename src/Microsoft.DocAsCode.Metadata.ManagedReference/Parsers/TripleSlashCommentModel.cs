@@ -7,7 +7,6 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
     using System.Collections.Generic;
     using System.IO;
     using System.Linq;
-    using System.Net;
     using System.Text;
     using System.Text.RegularExpressions;
     using System.Web;
@@ -16,18 +15,17 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
     using System.Xml.XPath;
 
     using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.Plugins;
     using Microsoft.DocAsCode.DataContracts.ManagedReference;
-    using Microsoft.DocAsCode.Utility;
 
     public class TripleSlashCommentModel
     {
         private const string idSelector = @"((?![0-9])[\w_])+[\w\(\)\.\{\}\[\]\|\*\^~#@!`,_<>:]*";
-        private static Regex CommentIdRegex = new Regex(@"^(?<type>N|T|M|P|F|E):(?<id>" + idSelector + ")$", RegexOptions.Compiled);
+        private static Regex CommentIdRegex = new Regex(@"^(?<type>N|T|M|P|F|E|Overload):(?<id>" + idSelector + ")$", RegexOptions.Compiled);
         private static Regex LineBreakRegex = new Regex(@"\r?\n", RegexOptions.Compiled);
         private static Regex CodeElementRegex = new Regex(@"<code[^>]*>([\s\S]*?)</code>", RegexOptions.Compiled);
 
         private readonly ITripleSlashCommentParserContext _context;
-        private readonly TripleSlashCommentTransformer _transformer = new TripleSlashCommentTransformer();
 
         public string Summary { get; private set; }
         public string Remarks { get; private set; }
@@ -38,11 +36,12 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         public List<string> Examples { get; private set; }
         public Dictionary<string, string> Parameters { get; private set; }
         public Dictionary<string, string> TypeParameters { get; private set; }
+        public bool IsInheritDoc { get; private set; }
 
         private TripleSlashCommentModel(string xml, SyntaxLanguage language, ITripleSlashCommentParserContext context)
         {
             // Transform triple slash comment
-            XDocument doc = _transformer.Transform(xml, language);
+            XDocument doc = TripleSlashCommentTransformer.Transform(xml, language);
 
             _context = context;
             if (!context.PreserveRawInlineComments)
@@ -61,6 +60,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             Examples = GetExamples(nav, context);
             Parameters = GetParameters(nav, context);
             TypeParameters = GetTypeParameters(nav, context);
+            IsInheritDoc = GetIsInheritDoc(nav, context);
         }
 
         public static TripleSlashCommentModel CreateModel(string xml, SyntaxLanguage language, ITripleSlashCommentParserContext context)
@@ -82,6 +82,32 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             {
                 return null;
             }
+        }
+
+        public void CopyInheritedData(TripleSlashCommentModel src)
+        {
+            if (src == null)
+                throw new ArgumentNullException(nameof(src));
+
+            if (Summary == null)
+                Summary = src.Summary;
+            if (Remarks == null)
+                Remarks = src.Remarks;
+            if (Returns == null)
+                Returns = src.Returns;
+
+            if (Exceptions == null && src.Exceptions != null)
+                Exceptions = src.Exceptions.Select(e => e.Clone()).ToList();
+            if (Sees == null && src.Sees != null)
+                Sees = src.Sees.Select(s => s.Clone()).ToList();
+            if (SeeAlsos == null && src.SeeAlsos != null)
+                SeeAlsos = src.SeeAlsos.Select(s => s.Clone()).ToList();
+            if (Examples == null && src.Examples != null)
+                Examples = new List<string>(src.Examples);
+            if (Parameters == null && src.Parameters != null)
+                Parameters = new Dictionary<string, string>(src.Parameters);
+            if (TypeParameters == null && src.TypeParameters != null)
+                TypeParameters = new Dictionary<string, string>(src.TypeParameters);
         }
 
         public string GetParameter(string name)
@@ -198,23 +224,39 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         /// <param name="xml"></param>
         /// <param name="context"></param>
         /// <returns></returns>
-        /// <example> 
+        /// <example>
         /// This sample shows how to call the <see cref="GetExceptions(string, ITripleSlashCommentParserContext)"/> method.
         /// <code>
-        /// class TestClass  
-        /// { 
-        ///     static int Main()  
-        ///     { 
-        ///         return GetExceptions(null, null).Count(); 
-        ///     } 
-        /// } 
-        /// </code> 
+        /// class TestClass
+        /// {
+        ///     static int Main()
+        ///     {
+        ///         return GetExceptions(null, null).Count();
+        ///     }
+        /// }
+        /// </code>
         /// </example>
         private List<string> GetExamples(XPathNavigator nav, ITripleSlashCommentParserContext context)
         {
             // Resolve <see cref> to @ syntax
             // Also support <seealso cref>
             return GetMultipleExampleNodes(nav, "/member/example").ToList();
+        }
+
+        private bool GetIsInheritDoc(XPathNavigator nav, ITripleSlashCommentParserContext context)
+        {
+            var node = nav.SelectSingleNode("/member/inheritdoc");
+            if (node == null)
+                return false;
+            if (node.HasAttributes)
+            {
+                //The Sandcastle implementation of <inheritdoc /> supports two attributes: 'cref' and 'select'.
+                //These attributes allow changing the source of the inherited doc and controlling what is inherited.
+                //Until these attributes are supported, ignoring inheritdoc elements with attributes, so as not to misinterpret them.
+                Logger.LogWarning("Attributes on <inheritdoc /> elements are not supported; inheritdoc element will be ignored.");
+                return false;
+            }
+            return true;
         }
 
         private Dictionary<string, string> GetListContent(XPathNavigator navigator, string xpath, string contentType, ITripleSlashCommentParserContext context)
@@ -230,8 +272,8 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 {
                     if (result.ContainsKey(name))
                     {
-                        string path = context.Source.Remote != null ? Path.Combine(context.Source.Remote.LocalWorkingDirectory, context.Source.Remote.RelativePath) : context.Source.Path;
-                        Logger.LogWarning($"Duplicate {contentType} '{name}' found in comments, the latter one is ignored.", null, path.ToDisplayPath(), context.Source.StartLine.ToString());
+                        string path = context.Source.Remote != null ? Path.Combine(EnvironmentContext.BaseDirectory, context.Source.Remote.RelativePath) : context.Source.Path;
+                        Logger.LogWarning($"Duplicate {contentType} '{name}' found in comments, the latter one is ignored.", null, StringExtension.ToDisplayPath(path), context.Source.StartLine.ToString());
                     }
                     else
                     {
@@ -275,22 +317,29 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 foreach (var item in nodes)
                 {
                     var cref = item.Attribute("cref").Value;
-                    // Strict check is needed as value could be an invalid href, 
+                    // Strict check is needed as value could be an invalid href,
                     // e.g. !:Dictionary&lt;TKey, string&gt; when user manually changed the intellisensed generic type
-                    if (CommentIdRegex.IsMatch(cref))
+                    var match = CommentIdRegex.Match(cref);
+                    if (match.Success)
                     {
-                        var value = cref.Substring(2);
+                        var id = match.Groups["id"].Value;
+                        var type = match.Groups["type"].Value;
+
+                        if (type == "Overload")
+                        {
+                            id += '*';
+                        }
 
                         // When see and seealso are top level nodes in triple slash comments, do not convert it into xref node
                         if (item.Parent?.Parent != null)
                         {
-                            var replacement = XElement.Parse($"<xref href=\"{HttpUtility.UrlEncode(value)}\" data-throw-if-not-resolved=\"false\"></xref>");
+                            var replacement = XElement.Parse($"<xref href=\"{HttpUtility.UrlEncode(id)}\" data-throw-if-not-resolved=\"false\"></xref>");
                             item.ReplaceWith(replacement);
                         }
 
                         if (addReference != null)
                         {
-                            addReference(value, cref);
+                            addReference(id, cref);
                         }
                     }
                     else
@@ -344,11 +393,16 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 if (!string.IsNullOrEmpty(commentId))
                 {
                     // Check if exception type is valid and trim prefix
-                    if (CommentIdRegex.IsMatch(commentId))
+                    var match = CommentIdRegex.Match(commentId);
+                    if (match.Success)
                     {
-                        string type = commentId.Substring(2);
-                        if (string.IsNullOrEmpty(description)) description = null;
-                        yield return new ExceptionInfo { Description = description, Type = type, CommentId = commentId };
+                        var id = match.Groups["id"].Value;
+                        var type = match.Groups["type"].Value;
+                        if (type == "T")
+                        {
+                            if (string.IsNullOrEmpty(description)) description = null;
+                            yield return new ExceptionInfo { Description = description, Type = id, CommentId = commentId };
+                        }
                     }
                 }
             }
@@ -368,15 +422,22 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 if (!string.IsNullOrEmpty(commentId))
                 {
                     // Check if cref type is valid and trim prefix
-                    if (CommentIdRegex.IsMatch(commentId))
+                    var match = CommentIdRegex.Match(commentId);
+                    if (match.Success)
                     {
-                        string type = commentId.Substring(2);
-                        yield return new LinkInfo { AltText = altText, LinkId = type, CommentId = commentId, LinkType = LinkType.CRef };
+                        var id = match.Groups["id"].Value;
+                        var type = match.Groups["type"].Value;
+                        if (type == "Overload")
+                        {
+                            id += '*';
+                        }
+
+                        yield return new LinkInfo { AltText = altText, LinkId = id, CommentId = commentId, LinkType = LinkType.CRef };
                     }
                 }
                 else if (!string.IsNullOrEmpty(url))
                 {
-                    yield return new LinkInfo { AltText = altText, LinkId = url, LinkType = LinkType.HRef };
+                    yield return new LinkInfo { AltText = altText ?? url, LinkId = url, LinkType = LinkType.HRef };
                 }
             }
         }
@@ -408,7 +469,46 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             var lineInfo = node as IXmlLineInfo;
             int column = lineInfo.HasLineInfo() ? lineInfo.LinePosition - 2 : 0;
 
-            return NormalizeXml(node.InnerXml, column);
+            return NormalizeXml(RemoveLeadingSpaces(node.InnerXml), column);
+        }
+
+        /// <summary>
+        /// Remove least common whitespces in each line of xml
+        /// </summary>
+        /// <param name="xml"></param>
+        /// <returns>xml after removing least common whitespaces</returns>
+        private static string RemoveLeadingSpaces(string xml)
+        {
+            var lines = LineBreakRegex.Split(xml);
+            var normalized = new List<string>();
+
+            var preIndex = 0;
+            var leadingSpaces = from line in lines
+                                where !string.IsNullOrWhiteSpace(line)
+                                select line.TakeWhile(char.IsWhiteSpace).Count();
+
+            if (leadingSpaces.Any())
+            {
+                preIndex = leadingSpaces.Min();
+            }
+
+            if (preIndex == 0)
+            {
+                return xml;
+            }
+
+            foreach (var line in lines)
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                {
+                    normalized.Add(string.Empty);
+                }
+                else
+                {
+                    normalized.Add(line.Substring(preIndex));
+                }
+            }
+            return string.Join("\n", normalized);
         }
 
         /// <summary>

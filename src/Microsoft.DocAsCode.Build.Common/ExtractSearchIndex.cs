@@ -12,10 +12,9 @@ namespace Microsoft.DocAsCode.Build.Common
     using System.Composition;
     using System.Collections.Immutable;
 
-    using Microsoft.DocAsCode.Plugins;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
-    using Microsoft.DocAsCode.Utility;
+    using Microsoft.DocAsCode.Plugins;
 
     using HtmlAgilityPack;
     using Newtonsoft.Json;
@@ -47,7 +46,7 @@ namespace Microsoft.DocAsCode.Build.Common
             var indexDataFilePath = Path.Combine(outputFolder, IndexFileName);
             var htmlFiles = (from item in manifest.Files ?? Enumerable.Empty<ManifestItem>()
                              from output in item.OutputFiles
-                             where output.Key.Equals(".html", StringComparison.OrdinalIgnoreCase)
+                             where item.DocumentType != "Toc" && output.Key.Equals(".html", StringComparison.OrdinalIgnoreCase)
                              select output.Value.RelativePath).ToList();
             if (htmlFiles.Count == 0)
             {
@@ -59,13 +58,16 @@ namespace Microsoft.DocAsCode.Build.Common
             {
                 var filePath = Path.Combine(outputFolder, relativePath);
                 var html = new HtmlDocument();
-                Logger.LogVerbose($"Extracting index data from {filePath}");
+                Logger.LogDiagnostic($"Extracting index data from {filePath}");
 
-                if (File.Exists(filePath))
+                if (EnvironmentContext.FileAbstractLayer.Exists(filePath))
                 {
                     try
                     {
-                        html.Load(filePath, Encoding.UTF8);
+                        using (var stream = EnvironmentContext.FileAbstractLayer.OpenRead(filePath))
+                        {
+                            html.Load(stream, Encoding.UTF8);
+                        }
                     }
                     catch (Exception ex)
                     {

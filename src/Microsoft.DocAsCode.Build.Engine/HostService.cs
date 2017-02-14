@@ -17,13 +17,14 @@ namespace Microsoft.DocAsCode.Build.Engine
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.MarkdownLite;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
 
     [Export(typeof(IHostService))]
     internal sealed class HostService : IHostService, IDisposable
     {
         #region Fields
+        private static readonly char[] UriFragmentOrQueryString = new char[] { '#', '?' };
         private readonly object _syncRoot = new object();
+        private readonly object _tocSyncRoot = new object();
         private readonly Dictionary<string, List<FileModel>> _uidIndex = new Dictionary<string, List<FileModel>>();
         private readonly LruList<ModelWithCache> _lru = Environment.Is64BitProcess ? null : LruList<ModelWithCache>.CreateSynchronized(0xC00, OnLruRemoving);
         #endregion
@@ -44,20 +45,11 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public DependencyGraph DependencyGraph { get; set; }
 
-        public Dictionary<FileAndType, LoadPhase> ModelLoadInfo { get; } = new Dictionary<FileAndType, LoadPhase>();
-
-        public ModelManifest CurrentIntermediateModelManifest { get; set; }
-
-        public ModelManifest LastIntermediateModelManifest { get; set; }
-
         public bool ShouldTraceIncrementalInfo { get; set; }
 
         public bool CanIncrementalBuild { get; set; }
 
-        public string IncrementalBaseDir { get; set; }
-
-        public string LastIncrementalBaseDir { get; set; }
-
+        public ImmutableList<TreeItemRestructure> TableOfContentRestructions { get; set; }
         #endregion
 
         #region Constructors
@@ -147,111 +139,10 @@ namespace Microsoft.DocAsCode.Build.Engine
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.Fail("Markup failed!");
-                Logger.LogWarning($"Markup failed:{Environment.NewLine}  Markdown: {markdown}{Environment.NewLine}  Details:{ex.ToString()}");
-                return new MarkupResult { Html = markdown };
+                var message = $"Markup failed: {ex.Message}.";
+                Logger.LogError(message);
+                throw new DocumentException(message, ex);
             }
-        }
-
-        public string MarkupToHtml(string markdown, string file)
-        {
-            return MarkdownService.Markup(markdown, file).Html;
-        }
-
-        public MarkupResult ParseHtml(string html, FileAndType ft)
-        {
-            var doc = new HtmlDocument();
-            doc.LoadHtml(html);
-            var result = new MarkupResult();
-
-            var node = doc.DocumentNode.SelectSingleNode("//yamlheader");
-            if (node != null)
-            {
-                using (var sr = new StringReader(StringHelper.HtmlDecode(node.InnerHtml)))
-                {
-                    result.YamlHeader = YamlUtility.Deserialize<Dictionary<string, object>>(sr).ToImmutableDictionary();
-                }
-                node.Remove();
-            }
-            var linkToFiles = new HashSet<string>();
-            var fileLinkSources = new Dictionary<string, List<LinkSourceInfo>>();
-            foreach (var pair in (from n in doc.DocumentNode.Descendants()
-                                  where !string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
-                                  from attr in n.Attributes
-                                  where string.Equals(attr.Name, "src", StringComparison.OrdinalIgnoreCase) ||
-                                        string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase)
-                                  where !string.IsNullOrWhiteSpace(attr.Value)
-                                  select new { Node = n, Attr = attr }).ToList())
-            {
-                string linkFile;
-                string anchor = null;
-                var link = pair.Attr;
-                if (PathUtility.IsRelativePath(link.Value))
-                {
-                    var index = link.Value.IndexOf('#');
-                    if (index == -1)
-                    {
-                        linkFile = link.Value;
-                    }
-                    else if (index == 0)
-                    {
-                        continue;
-                    }
-                    else
-                    {
-                        linkFile = link.Value.Remove(index);
-                        anchor = link.Value.Substring(index);
-                    }
-                    var path = (RelativePath)ft.File + (RelativePath)linkFile;
-                    var file = path.GetPathFromWorkingFolder();
-                    if (SourceFiles.ContainsKey(file))
-                    {
-                        link.Value = file;
-                        if (!string.IsNullOrEmpty(anchor) &&
-                            string.Equals(link.Name, "href", StringComparison.OrdinalIgnoreCase))
-                        {
-                            pair.Node.SetAttributeValue("anchor", anchor);
-                        }
-                    }
-                    linkToFiles.Add(HttpUtility.UrlDecode(file));
-
-                    List<LinkSourceInfo> sources;
-                    if (!fileLinkSources.TryGetValue(file, out sources))
-                    {
-                        sources = new List<LinkSourceInfo>();
-                        fileLinkSources[file] = sources;
-                    }
-                    sources.Add(new LinkSourceInfo
-                    {
-                        Target = file,
-                        SourceFile = pair.Node.GetAttributeValue("sourceFile", null),
-                        LineNumber = pair.Node.GetAttributeValue("sourceLineNumber", 0),
-                    });
-                }
-            }
-            result.LinkToFiles = linkToFiles.ToImmutableArray();
-            result.FileLinkSources = fileLinkSources.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.ToImmutableList());
-
-            result.UidLinkSources = (from n in doc.DocumentNode.Descendants()
-                                     where string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
-                                     from attr in n.Attributes
-                                     where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
-                                     where !string.IsNullOrWhiteSpace(attr.Value)
-                                     select new LinkSourceInfo
-                                     {
-                                         Target = attr.Value,
-                                         SourceFile = n.GetAttributeValue("sourceFile", null),
-                                         LineNumber = n.GetAttributeValue("sourceLineNumber", 0),
-                                     } into lsi
-                                     group lsi by lsi.Target into g
-                                     select new KeyValuePair<string, ImmutableList<LinkSourceInfo>>(g.Key, g.ToImmutableList())).ToImmutableDictionary();
-            result.LinkToUids = result.UidLinkSources.Keys.ToImmutableHashSet();
-
-            using (var sw = new StringWriter())
-            {
-                doc.Save(sw);
-                result.Html = sw.ToString();
-            }
-            return result;
         }
 
         public MarkupResult Parse(MarkupResult markupResult, FileAndType ft)
@@ -282,78 +173,11 @@ namespace Microsoft.DocAsCode.Build.Engine
                 }
                 node.Remove();
             }
-            var linkToFiles = new HashSet<string>();
-            var fileLinkSources = new Dictionary<string, List<LinkSourceInfo>>();
-            foreach (var pair in (from n in doc.DocumentNode.Descendants()
-                                  where !string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
-                                  from attr in n.Attributes
-                                  where string.Equals(attr.Name, "src", StringComparison.OrdinalIgnoreCase) ||
-                                        string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase)
-                                  where !string.IsNullOrWhiteSpace(attr.Value)
-                                  select new { Node = n, Attr = attr }).ToList())
-            {
-                string linkFile;
-                string anchor = null;
-                var link = pair.Attr;
-                if (PathUtility.IsRelativePath(link.Value))
-                {
-                    var index = link.Value.IndexOf('#');
-                    if (index == -1)
-                    {
-                        linkFile = link.Value;
-                    }
-                    else if (index == 0)
-                    {
-                        continue;
-                    }
-                    else
-                    {
-                        linkFile = link.Value.Remove(index);
-                        anchor = link.Value.Substring(index);
-                    }
-                    var path = (RelativePath)ft.File + (RelativePath)linkFile;
-                    var file = path.GetPathFromWorkingFolder();
-                    if (SourceFiles.ContainsKey(file))
-                    {
-                        link.Value = file;
-                        if (!string.IsNullOrEmpty(anchor) &&
-                            string.Equals(link.Name, "href", StringComparison.OrdinalIgnoreCase))
-                        {
-                            pair.Node.SetAttributeValue("anchor", anchor);
-                        }
-                    }
-                    linkToFiles.Add(HttpUtility.UrlDecode(file));
 
-                    List<LinkSourceInfo> sources;
-                    if (!fileLinkSources.TryGetValue(file, out sources))
-                    {
-                        sources = new List<LinkSourceInfo>();
-                        fileLinkSources[file] = sources;
-                    }
-                    sources.Add(new LinkSourceInfo
-                    {
-                        Target = file,
-                        SourceFile = pair.Node.GetAttributeValue("sourceFile", null),
-                        LineNumber = pair.Node.GetAttributeValue("sourceStartLineNumber", 0),
-                    });
-                }
-            }
-            result.LinkToFiles = linkToFiles.ToImmutableArray();
-            result.FileLinkSources = fileLinkSources.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.ToImmutableList());
+            result.FileLinkSources = GetFileLinkSource(ft, doc);
+            result.LinkToFiles = result.FileLinkSources.Keys.ToImmutableArray();
 
-            result.UidLinkSources = (from n in doc.DocumentNode.Descendants()
-                                     where string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
-                                     from attr in n.Attributes
-                                     where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
-                                     where !string.IsNullOrWhiteSpace(attr.Value)
-                                     select new LinkSourceInfo
-                                     {
-                                         Target = attr.Value,
-                                         SourceFile = n.GetAttributeValue("sourceFile", null),
-                                         LineNumber = n.GetAttributeValue("sourceLineNumber", 0),
-                                     } into lsi
-                                     group lsi by lsi.Target into g
-                                     select new KeyValuePair<string, ImmutableList<LinkSourceInfo>>(g.Key, g.ToImmutableList())).ToImmutableDictionary();
+            result.UidLinkSources = GetUidLinkSources(doc);
             result.LinkToUids = result.UidLinkSources.Keys.ToImmutableHashSet();
 
             if (result.Dependency.Length > 0)
@@ -374,6 +198,93 @@ namespace Microsoft.DocAsCode.Build.Engine
             return result;
         }
 
+        private ImmutableDictionary<string, ImmutableList<LinkSourceInfo>> GetFileLinkSource(FileAndType ft, HtmlDocument doc)
+        {
+            var fileLinkSources = new Dictionary<string, List<LinkSourceInfo>>();
+            foreach (var pair in (from n in doc.DocumentNode.Descendants()
+                                  where !string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
+                                  from attr in n.Attributes
+                                  where string.Equals(attr.Name, "src", StringComparison.OrdinalIgnoreCase) ||
+                                        string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase)
+                                  where !string.IsNullOrWhiteSpace(attr.Value)
+                                  select new { Node = n, Attr = attr }).ToList())
+            {
+                string anchor = null;
+                var link = pair.Attr;
+                string linkFile = link.Value;
+                var index = linkFile.IndexOfAny(UriFragmentOrQueryString);
+                if (index != -1)
+                {
+                    anchor = linkFile.Substring(index);
+                    linkFile = linkFile.Remove(index);
+                }
+                if (RelativePath.IsRelativePath(linkFile))
+                {
+                    var path = (RelativePath)ft.File + (RelativePath)linkFile;
+                    var file = path.GetPathFromWorkingFolder().UrlDecode();
+                    if (SourceFiles.ContainsKey(file))
+                    {
+                        string anchorInHref;
+                        if (!string.IsNullOrEmpty(anchor) &&
+                            string.Equals(link.Name, "href", StringComparison.OrdinalIgnoreCase))
+                        {
+                            anchorInHref = anchor;
+                        }
+                        else
+                        {
+                            anchorInHref = null;
+                        }
+
+                        link.Value = file.UrlEncode().ToString() + anchorInHref;
+                    }
+
+                    List<LinkSourceInfo> sources;
+                    if (!fileLinkSources.TryGetValue(file, out sources))
+                    {
+                        sources = new List<LinkSourceInfo>();
+                        fileLinkSources[file] = sources;
+                    }
+                    sources.Add(new LinkSourceInfo
+                    {
+                        Target = file,
+                        Anchor = anchor,
+                        SourceFile = pair.Node.GetAttributeValue("sourceFile", null),
+                        LineNumber = pair.Node.GetAttributeValue("sourceStartLineNumber", 0),
+                    });
+                }
+            }
+            return fileLinkSources.ToImmutableDictionary(x => x.Key, x => x.Value.ToImmutableList());
+        }
+
+        private static ImmutableDictionary<string, ImmutableList<LinkSourceInfo>> GetUidLinkSources(HtmlDocument doc)
+        {
+            var uidInXref =
+                from n in doc.DocumentNode.Descendants()
+                where string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
+                from attr in n.Attributes
+                where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
+                select Tuple.Create(n, attr.Value);
+            var uidInHref =
+                from n in doc.DocumentNode.Descendants()
+                where !string.Equals(n.Name, "xref", StringComparison.OrdinalIgnoreCase)
+                from attr in n.Attributes
+                where string.Equals(attr.Name, "href", StringComparison.OrdinalIgnoreCase) || string.Equals(attr.Name, "uid", StringComparison.OrdinalIgnoreCase)
+                where attr.Value.StartsWith("xref:", StringComparison.OrdinalIgnoreCase)
+                select Tuple.Create(n, attr.Value.Substring("xref:".Length));
+            return (from pair in uidInXref.Concat(uidInHref)
+                    where !string.IsNullOrWhiteSpace(pair.Item2)
+                    let queryIndex = pair.Item2.IndexOfAny(UriFragmentOrQueryString)
+                    let targetUid = queryIndex == -1 ? pair.Item2 : pair.Item2.Remove(queryIndex)
+                    select new LinkSourceInfo
+                    {
+                        Target = Uri.UnescapeDataString(targetUid),
+                        SourceFile = pair.Item1.GetAttributeValue("sourceFile", null),
+                        LineNumber = pair.Item1.GetAttributeValue("sourceStartLineNumber", 0),
+                    } into lsi
+                    group lsi by lsi.Target into g
+                    select new KeyValuePair<string, ImmutableList<LinkSourceInfo>>(g.Key, g.ToImmutableList())).ToImmutableDictionary();
+        }
+
         public void ReportDependencyTo(FileModel currentFileModel, string to, string type)
         {
             if (currentFileModel == null)
@@ -387,6 +298,10 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (type == null)
             {
                 throw new ArgumentNullException(nameof(type));
+            }
+            if (DependencyGraph == null)
+            {
+                return;
             }
             lock (DependencyGraph)
             {
@@ -409,6 +324,10 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (type == null)
             {
                 throw new ArgumentNullException(nameof(type));
+            }
+            if (DependencyGraph == null)
+            {
+                return;
             }
             lock (DependencyGraph)
             {
@@ -479,115 +398,129 @@ namespace Microsoft.DocAsCode.Build.Engine
             }
         }
 
-        #region Model Load Info
+        #region Incremental Build
 
-        public void ReportModelLoadInfo(FileAndType file, LoadPhase phase)
+        public void RegisterDependencyType()
         {
-            ModelLoadInfo[file] = phase;
-        }
-
-        public void ReportModelLoadInfo(IEnumerable<FileAndType> files, LoadPhase phase)
-        {
-            foreach (var f in files)
+            if (DependencyGraph == null)
             {
-                ReportModelLoadInfo(f, phase);
+                return;
             }
+            BuildPhaseUtility.RunBuildSteps(
+                Processor.BuildSteps,
+                buildStep =>
+                {
+                    if (buildStep is ISupportIncrementalBuildStep)
+                    {
+                        Logger.LogVerbose($"Processor {Processor.Name}, step {buildStep.Name}: Registering DependencyType...");
+                        using (new LoggerPhaseScope(buildStep.Name, LogLevel.Diagnostic))
+                        {
+                            var types = (buildStep as ISupportIncrementalBuildStep).GetDependencyTypesToRegister();
+                            if (types == null)
+                            {
+                                return;
+                            }
+                            DependencyGraph.RegisterDependencyType(types);
+                        }
+                    }
+                });
         }
 
-        public void ReloadModelsPerIncrementalChanges(IEnumerable<string> changes, string intermediateFolder, ModelManifest lmm, LoadPhase phase)
+        public void ReloadModelsPerIncrementalChanges(IncrementalBuildContext incrementalContext, IEnumerable<string> changes, BuildPhase loadedAt)
         {
             if (changes == null)
             {
                 return;
             }
             ReloadUnloadedModelsPerCondition(
-                phase,
+                incrementalContext,
+                loadedAt,
                 f =>
                 {
-                    var key = ((RelativePath)f.File).GetPathFromWorkingFolder().ToString();
+                    var key = ((RelativePath)f).GetPathFromWorkingFolder().ToString();
                     return changes.Contains(key);
                 });
         }
 
-        public void ReloadUnloadedModels(LoadPhase phase)
+        public void ReloadUnloadedModels(IncrementalBuildContext incrementalContext, BuildPhase loadedAt)
         {
-            ReloadUnloadedModelsPerCondition(phase, f => ModelLoadInfo[f] == LoadPhase.None);
+            var mi = incrementalContext.GetModelLoadInfo(this);
+            ReloadUnloadedModelsPerCondition(incrementalContext, loadedAt, f => mi[f] == null);
         }
 
-        private void ReloadUnloadedModelsPerCondition(LoadPhase phase, Func<FileAndType, bool> condition)
-        {
-            if (!CanIncrementalBuild)
-            {
-                return;
-            }
-            var toLoadList = (from f in ModelLoadInfo.Keys
-                              where condition(f)
-                              select LoadIntermediateModel(f.File) into m
-                              where m != null
-                              select m).ToList();
-            if (toLoadList.Count > 0)
-            {
-                Reload(Models.Concat(toLoadList));
-                ReportModelLoadInfo(toLoadList.Select(t => t.FileAndType), phase);
-            }
-        }
-
-        public void SaveIntermediateModel()
+        public void SaveIntermediateModel(IncrementalBuildContext incrementalContext)
         {
             if (!ShouldTraceIncrementalInfo)
             {
                 return;
             }
             var processor = (ISupportIncrementalDocumentProcessor)Processor;
+            var mi = incrementalContext.GetModelLoadInfo(this);
+            var lmm = incrementalContext.GetLastIntermediateModelManifest(this);
+            var cmm = incrementalContext.GetCurrentIntermediateModelManifest(this);
 
-            foreach (var pair in ModelLoadInfo)
+            foreach (var pair in mi)
             {
                 IncrementalUtility.RetryIO(() =>
                 {
-                    string fileName = IncrementalUtility.GetRandomEntry(IncrementalBaseDir);
-                    if (pair.Value == LoadPhase.None)
+                    string fileName = IncrementalUtility.GetRandomEntry(incrementalContext.BaseDir);
+                    if (pair.Value == null)
                     {
-                        if (LastIntermediateModelManifest == null)
+                        if (lmm == null)
                         {
-                            throw new InvalidDataException($"Full build hasn't loaded model {pair.Key.FullPath}");
+                            throw new BuildCacheException($"Full build hasn't loaded model {pair.Key}");
                         }
                         string lfn;
-                        if (!LastIntermediateModelManifest.Models.TryGetValue(pair.Key.File, out lfn))
+                        if (!lmm.Models.TryGetValue(pair.Key, out lfn))
                         {
-                            throw new InvalidDataException($"Last build hasn't loaded model {pair.Key.FullPath}");
+                            throw new BuildCacheException($"Last build hasn't loaded model {pair.Key}");
                         }
-                        File.Move(Path.Combine(LastIncrementalBaseDir, lfn), Path.Combine(IncrementalBaseDir, fileName));
+
+                        // use copy rather than move because if the build failed, the intermediate files of last successful build shouldn't be corrupted.
+                        File.Copy(Path.Combine(incrementalContext.LastBaseDir, lfn), Path.Combine(incrementalContext.BaseDir, fileName));
                     }
                     else
                     {
-                        var key = RelativePath.NormalizedWorkingFolder + pair.Key.File;
+                        var key = RelativePath.NormalizedWorkingFolder + pair.Key;
                         var model = Models.Find(m => m.Key == key);
-                        using (var stream = File.Create(Path.Combine(IncrementalBaseDir, fileName)))
+                        using (var stream = File.Create(Path.Combine(incrementalContext.BaseDir, fileName)))
                         {
                             processor.SaveIntermediateModel(model, stream);
                         }
                     }
-                    CurrentIntermediateModelManifest.Models.Add(pair.Key.File, fileName);
+                    cmm.Models.Add(pair.Key, fileName);
                 });
             }
         }
 
-        public FileModel LoadIntermediateModel(string fileName)
+        public FileModel LoadIntermediateModel(IncrementalBuildContext incrementalContext, string fileName)
         {
             if (!CanIncrementalBuild)
             {
                 return null;
             }
             var processor = (ISupportIncrementalDocumentProcessor)Processor;
+            var cmm = incrementalContext.GetCurrentIntermediateModelManifest(this);
             string cfn;
-            if (!CurrentIntermediateModelManifest.Models.TryGetValue(fileName, out cfn))
+            if (!cmm.Models.TryGetValue(fileName, out cfn))
             {
-                throw new InvalidDataException($"Last build hasn't loaded model {fileName}");
+                throw new BuildCacheException($"Last build hasn't loaded model {fileName}");
             }
-            using (var stream = File.OpenRead(Path.Combine(IncrementalBaseDir, cfn)))
+            using (var stream = File.OpenRead(Path.Combine(incrementalContext.BaseDir, cfn)))
             {
                 return processor.LoadIntermediateModel(stream);
             }
+        }
+
+        public List<string> GetUnloadedModelFiles(IncrementalBuildContext incrementalContext)
+        {
+            if (!CanIncrementalBuild)
+            {
+                return new List<string>();
+            }
+            return (from pair in incrementalContext.GetModelLoadInfo(this)
+                    where pair.Value == null
+                    select pair.Key).ToList();
         }
 
         #endregion
@@ -634,6 +567,25 @@ namespace Microsoft.DocAsCode.Build.Engine
                 {
                     FileMap[m.FileAndType] = m.FileAndType;
                 }
+            }
+        }
+
+        private void ReloadUnloadedModelsPerCondition(IncrementalBuildContext incrementalContext, BuildPhase phase, Func<string, bool> condition)
+        {
+            if (!CanIncrementalBuild)
+            {
+                return;
+            }
+            var mi = incrementalContext.GetModelLoadInfo(this);
+            var toLoadList = (from f in mi.Keys
+                              where condition(f)
+                              select LoadIntermediateModel(incrementalContext, f) into m
+                              where m != null
+                              select m).ToList();
+            if (toLoadList.Count > 0)
+            {
+                Reload(Models.Concat(toLoadList));
+                incrementalContext.ReportModelLoadInfo(this, toLoadList.Select(t => t.FileAndType.File), phase);
             }
         }
 
@@ -708,13 +660,5 @@ namespace Microsoft.DocAsCode.Build.Engine
         }
 
         #endregion
-    }
-
-    internal enum LoadPhase
-    {
-        None,
-        PreBuild,
-        PostBuild,
-        PostPostBuild,
     }
 }

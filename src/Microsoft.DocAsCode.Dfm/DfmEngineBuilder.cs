@@ -16,7 +16,6 @@ namespace Microsoft.DocAsCode.Dfm
     public class DfmEngineBuilder : GfmEngineBuilder
     {
         private readonly string _baseDir;
-        private readonly string _workingDir;
         private IReadOnlyList<string> _fallbackFolders;
 
         public DfmEngineBuilder(Options options, string baseDir = null, string templateDir = null, IReadOnlyList<string> fallbackFolders = null) : base(options)
@@ -40,6 +39,7 @@ namespace Microsoft.DocAsCode.Dfm
             }
             inlineRules.Insert(index + 1, new DfmXrefShortcutInlineRule());
             inlineRules.Insert(index + 1, new DfmEmailInlineRule());
+            inlineRules.Insert(index + 1, new DfmFencesInlineRule());
 
             // xref link inline rule must be before MarkdownLinkInlineRule
             inlineRules.Insert(index, new DfmIncludeInlineRule());
@@ -69,13 +69,6 @@ namespace Microsoft.DocAsCode.Dfm
                     new DfmFencesBlockRule(),
                     new DfmNoteBlockRule()
                 });
-
-            var gfmIndex = blockRules.FindIndex(item => item is GfmParagraphBlockRule);
-            if (gfmIndex < 0)
-            {
-                throw new ArgumentException("GfmParagraphBlockRule should exist!");
-            }
-            blockRules[gfmIndex] = new DfmParagraphBlockRule();
 
             var markdownBlockQuoteIndex = blockRules.FindIndex(item => item is MarkdownBlockquoteBlockRule);
             if (markdownBlockQuoteIndex < 0)

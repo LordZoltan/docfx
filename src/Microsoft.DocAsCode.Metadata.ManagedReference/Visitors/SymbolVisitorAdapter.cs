@@ -133,7 +133,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             item.Type = MemberType.Assembly;
             _references = new Dictionary<string, ReferenceItem>();
 
-            var typeMembers = symbol.GlobalNamespace.GetTypeMembers();
+            var typeMembers = symbol.GlobalNamespace.GetTypeMembers().Where(member => member.DeclaredAccessibility == Accessibility.Public);
             if (typeMembers.Any())
             {
                 Logger.LogWarning($"DocFX currently only supports generating metadata with namespace defined. The following types in assembly \"{symbol.MetadataName}\" will have no metadata generated: {string.Join(", ", typeMembers.Select(m => m.MetadataName))}. ");
@@ -274,6 +274,8 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 result.Overridden = AddSpecReference(symbol.OverriddenMethod, typeGenericParameters, methodGenericParameters);
             }
 
+            result.Overload = AddOverloadReference(symbol.OriginalDefinition);
+
             AddMemberImplements(symbol, result, typeGenericParameters, methodGenericParameters);
 
             result.Attributes = GetAttributeInfo(symbol.GetAttributes());
@@ -395,6 +397,8 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 result.Overridden = AddSpecReference(symbol.OverriddenProperty, typeGenericParameters);
             }
 
+            result.Overload = AddOverloadReference(symbol.OriginalDefinition);
+
             _generator.GenerateProperty(symbol, result, this);
 
             AddMemberImplements(symbol, result, typeGenericParameters);
@@ -424,6 +428,22 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
         public string AddReference(string id, string commentId)
         {
             return _generator.AddReference(id, commentId, _references);
+        }
+
+        public string AddOverloadReference(ISymbol symbol)
+        {
+            var memberType = GetMemberTypeFromSymbol(symbol);
+            switch (memberType)
+            {
+                case MemberType.Property:
+                case MemberType.Constructor:
+                case MemberType.Method:
+                case MemberType.Operator:
+                    return _generator.AddOverloadReference(symbol, _references, this);
+                default:
+                    Debug.Fail("Unexpected membertype.");
+                    throw new InvalidOperationException("Unexpected membertype.");
+            }
         }
 
         public string AddSpecReference(
@@ -513,13 +533,6 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             if (item.Type == MemberType.Default)
             {
                 // If Default, then it is Property get/set or Event add/remove/raise, ignore
-                return null;
-            }
-
-            var syntaxRef = symbol.DeclaringSyntaxReferences.FirstOrDefault();
-            Debug.Assert(syntaxRef != null || item.Type == MemberType.Constructor);
-            if (syntaxRef == null)
-            {
                 return null;
             }
 
@@ -754,7 +767,6 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
             return new TripleSlashCommentParserContext
             {
                 AddReferenceDelegate = GetAddReferenceDelegate(item),
-                Normalize = true,
                 PreserveRawInlineComments = preserve,
                 Source = item.Source
             };

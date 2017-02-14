@@ -7,6 +7,44 @@ $(function () {
   var show = 'show';
   var hide = 'hide';
 
+  // Styling for tables in conceptual documents using Bootstrap.
+  // See http://getbootstrap.com/css/#tables
+  (function () {
+    $('table').addClass('table table-bordered table-striped table-condensed');
+  })();
+
+  // Styling for alerts.
+  (function () {
+    $('.NOTE, .TIP').addClass('alert alert-info');
+    $('.WARNING').addClass('alert alert-warning');
+    $('.IMPORTANT, .CAUTION').addClass('alert alert-danger');
+  })();  
+
+  // Enable anchors for headings.
+  (function () {
+    anchors.options = {
+      placement: 'left',
+      visible: 'touch'
+    };
+    anchors.add('article h2, article h3, article h4, article h5, article h6');
+  })();
+
+  // Open links to different host in a new window.
+  (function () {
+    if ($("meta[property='docfx:newtab']").attr("content") === "true") {
+      $(document.links).filter(function() {
+        return this.hostname !== window.location.hostname;
+      }).attr('target', '_blank');
+    }
+  })();
+
+  // Enable highlight.js
+  (function () {
+    $('pre code').each(function(i, block) {
+      hljs.highlightBlock(block);
+    });
+  })();
+
   // Line highlight for code snippet
   (function () {
     $('pre code[highlight-lines]').each(function (i, block) {
@@ -70,7 +108,8 @@ $(function () {
   (function () {
     var query;
     var relHref = $("meta[property='docfx\\:rel']").attr("content");
-    if (relHref) {
+
+    if (typeof relHref != 'undefined') {
       var search = searchFactory();
       search();
       highlightKeywords();
@@ -98,6 +137,9 @@ $(function () {
         if (indexPath) {
           searchDataRequest.open('GET', indexPath);
           searchDataRequest.onload = function () {
+            if (this.status != 200) {
+              return;
+            }
             searchData = JSON.parse(this.responseText);
             for (var prop in searchData) {
               lunrIndex.add(searchData[prop]);
@@ -148,8 +190,8 @@ $(function () {
         var keywords = q.split("%20");
         keywords.forEach(function (keyword) {
           if (keyword !== "") {
-            highlight($('.data-searchable *'), keyword, "<mark>");
-            highlight($('article *'), keyword, "<mark>");
+            $('.data-searchable *').mark(keyword);
+            $('article *').mark(keyword);
           }
         });
       }
@@ -182,19 +224,6 @@ $(function () {
         $('.hide-when-search').hide();
         $('#search-results').show();
       }
-    }
-
-    function highlight(nodes, rgxStr, tag) {
-      var rgx = new RegExp(rgxStr, "gi");
-      nodes.each(function () {
-        $(this).contents().filter(function () {
-          return this.nodeType == 3 && rgx.test(this.nodeValue);
-        }).replaceWith(function () {
-          return (this.nodeValue || "").replace(rgx, function (match) {
-            return $(tag).text(match)[0].outerHTML;
-          });
-        });
-      });
     }
 
     function relativeUrlToAbsoluteUrl(currentUrl, relativeUrl) {
@@ -255,7 +284,7 @@ $(function () {
             );
             query.split(/\s+/).forEach(function (word) {
               if (word !== '') {
-                highlight($('#search-results>.sr-items *'), word, "<strong>");
+                $('#search-results>.sr-items *').mark(word);
               }
             });
           }
@@ -310,10 +339,13 @@ $(function () {
             }
             if (isActive) {
               $(e).parent().addClass(active);
-              breadcrumb.insert({
-                href: e.href,
-                name: e.innerHTML
-              }, 0);
+              if (!breadcrumb.isNavPartLoaded) {
+                breadcrumb.insert({
+                  href: e.href,
+                  name: e.innerHTML
+                }, 0);
+                breadcrumb.isNavPartLoaded = true;
+              }
             } else {
               $(e).parent().removeClass(active)
             }
@@ -326,6 +358,9 @@ $(function () {
       var tocPath = $("meta[property='docfx\\:tocrel']").attr("content");
       if (tocPath) tocPath = tocPath.replace(/\\/g, '/');
       $('#sidetoc').load(tocPath + " #sidetoggle > div", function () {
+        if ($('footer').is(':visible')) {
+          $('.sidetoc').addClass('shiftup');
+        }
         registerTocEvents();
 
         var index = tocPath.lastIndexOf('/');
@@ -344,20 +379,25 @@ $(function () {
           if (getAbsolutePath(e.href) === currentHref) {
             $(e).parent().addClass(active);
             var parent = $(e).parent().parents('li').children('a');
+            if (!breadcrumb.isTocPartLoaded) {
+              for (var i = parent.length - 1; i >= 0; i--) {
+                breadcrumb.push({
+                  href: parent[i].href,
+                  name: parent[i].innerHTML
+                });
+              }
+              breadcrumb.push({
+                href: e.href,
+                name: e.innerHTML
+              });
+              breadcrumb.isTocPartLoaded = true;
+            }
             if (parent.length > 0) {
               parent.addClass(active);
-              breadcrumb.push({
-                href: parent[0].href,
-                name: parent[0].innerHTML
-              });
             }
             // for active li, expand it
             $(e).parents('ul.nav>li').addClass(expanded);
 
-            breadcrumb.push({
-              href: e.href,
-              name: e.innerHTML
-            });
             // Scroll to active item
             var top = 0;
             $(e).parents('li').each(function (i, e) {
@@ -366,7 +406,7 @@ $(function () {
             // 50 is the size of the filter box
             $('.sidetoc').scrollTop(top - 50);
             if ($('footer').is(':visible')) {
-              $(".sidetoc").css("bottom", "70px");
+              $('.sidetoc').addClass('shiftup');
             }
           } else {
             $(e).parent().removeClass(active);
@@ -435,6 +475,8 @@ $(function () {
 
     function Breadcrumb() {
       var breadcrumb = [];
+      var isNavPartLoaded = false;
+      var isTocPartLoaded = false;
       this.push = pushBreadcrumb;
       this.insert = insertBreadcrumb;
 
@@ -642,13 +684,13 @@ $(function () {
     }
 
     function resetBottomCss() {
-      $(".sidetoc").css("bottom", "0");
-      $(".sideaffix").css("bottom", "10px");
+      $(".sidetoc").removeClass("shiftup");
+      $(".sideaffix").removeClass("shiftup");
     }
 
     function shiftUpBottomCss() {
-      $(".sidetoc").css("bottom", "70px");
-      $(".sideaffix").css("bottom", "70px");
+      $(".sidetoc").addClass("shiftup");
+      $(".sideaffix").addClass("shiftup");
     }
   })();
 

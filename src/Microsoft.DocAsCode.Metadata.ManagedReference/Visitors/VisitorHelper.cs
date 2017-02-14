@@ -6,15 +6,20 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
     using System;
     using System.Diagnostics;
     using System.Linq;
+    using System.Text.RegularExpressions;
 
     using Microsoft.CodeAnalysis;
 
+    using Microsoft.DocAsCode.Common;
+    using Microsoft.DocAsCode.Common.Git;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.DataContracts.ManagedReference;
-    using Microsoft.DocAsCode.Utility;
+    using Microsoft.DocAsCode.Plugins;
 
     public static class VisitorHelper
     {
+        private static readonly Regex GenericMethodPostFix = new Regex(@"``\d+$", RegexOptions.Compiled);
+
         public static void FeedComments(MetadataItem item, ITripleSlashCommentParserContext context)
         {
             if (!string.IsNullOrEmpty(item.RawComment))
@@ -27,6 +32,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 item.Sees = commentModel.Sees;
                 item.SeeAlsos = commentModel.SeeAlsos;
                 item.Examples = commentModel.Examples;
+                item.IsInheritDoc = commentModel.IsInheritDoc;
                 item.CommentModel = commentModel;
             }
         }
@@ -54,7 +60,7 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 return null;
             }
 
-            return str.ToString().Substring(2);
+            return str.Substring(2);
         }
 
         public static string GetCommentId(ISymbol symbol)
@@ -69,6 +75,26 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                 return "T:" + typeof(object).FullName;
             }
             return symbol.GetDocumentationCommentId();
+        }
+
+        public static string GetOverloadId(ISymbol symbol)
+        {
+            return GetOverloadIdBody(symbol) + "*";
+        }
+
+        public static string GetOverloadIdBody(ISymbol symbol)
+        {
+            var id = GetId(symbol);
+            var uidBody = id;
+            {
+                var index = uidBody.IndexOf('(');
+                if (index != -1)
+                {
+                    uidBody = uidBody.Remove(index);
+                }
+            }
+            uidBody = GenericMethodPostFix.Replace(uidBody, string.Empty);
+            return uidBody;
         }
 
         public static ApiParameter GetParameterDescription(ISymbol symbol, MetadataItem item, string id, bool isReturn, ITripleSlashCommentParserContext context)
@@ -121,10 +147,10 @@ namespace Microsoft.DocAsCode.Metadata.ManagedReference
                     Name = symbol.Name
                 };
 
-                source.Remote = GitUtility.GetGitDetail(source.Path);
+                source.Remote = GitUtility.TryGetFileDetail(source.Path);
                 if (source.Remote != null)
                 {
-                    source.Path = source.Path.FormatPath(UriKind.Relative, source.Remote.LocalWorkingDirectory);
+                    source.Path = PathUtility.FormatPath(source.Path, UriKind.Relative, EnvironmentContext.BaseDirectory);
                 }
                 return source;
             }

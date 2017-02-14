@@ -12,7 +12,6 @@ namespace Microsoft.DocAsCode.Build.Engine
 
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.Build.Engine;
-    using Microsoft.DocAsCode.Utility;
 
     public sealed class ArchiveResourceCollection : ResourceCollection
     {
@@ -75,7 +74,7 @@ namespace Microsoft.DocAsCode.Build.Engine
         {
             // zip entry is case sensitive
             // incase relative path is combined by backslash \
-            return _zipped.GetEntry(name.Trim().ToNormalizedPath())?.Open();
+            return _zipped.GetEntry(StringExtension.ToNormalizedPath(name.Trim()))?.Open();
         }
 
         protected override void Dispose(bool disposing)
@@ -117,7 +116,7 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (IsEmpty) return null;
 
             // incase relative path is combined by backslash \
-            if (!Names.Contains(name.Trim().ToNormalizedPath(), ResourceComparer)) return null;
+            if (!Names.Contains(StringExtension.ToNormalizedPath(name.Trim()), ResourceComparer)) return null;
             var filePath = Path.Combine(_directory, name);
             return new FileStream(filePath, FileMode.Open, FileAccess.Read);
         }
@@ -181,7 +180,7 @@ namespace Microsoft.DocAsCode.Build.Engine
                 var stream = _collectionsInOverriddenOrder[i].GetResourceStream(name);
                 if (stream != null)
                 {
-                    Logger.LogVerbose($"Resource \"{name}\" is found from \"{_collectionsInOverriddenOrder[i].Name}\"");
+                    Logger.LogDiagnostic($"Resource \"{name}\" is found from \"{_collectionsInOverriddenOrder[i].Name}\"");
                     return stream;
                 }
             }

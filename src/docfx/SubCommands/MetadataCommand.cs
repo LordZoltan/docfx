@@ -21,7 +21,7 @@ namespace Microsoft.DocAsCode.SubCommands
         public bool AllowReplay => true;
 
         public MetadataJsonConfig Config { get; }
-        public IEnumerable<Microsoft.DocAsCode.Metadata.ManagedReference.ExtractMetadataInputModel> InputModels { get; }
+        public IEnumerable<ExtractMetadataInputModel> InputModels { get; }
 
         public MetadataCommand(MetadataCommandOptions options)
         {
@@ -31,16 +31,18 @@ namespace Microsoft.DocAsCode.SubCommands
 
         public void Exec(SubCommandRunningContext context)
         {
+            EnvironmentContext.SetBaseDirectory(Path.GetFullPath(string.IsNullOrEmpty(Config.BaseDirectory) ? Directory.GetCurrentDirectory() : Config.BaseDirectory));
             foreach (var inputModel in InputModels)
             {
                 // TODO: Use plugin to generate metadata for files with different extension?
-                using (var worker = new Microsoft.DocAsCode.Metadata.ManagedReference.ExtractMetadataWorker(inputModel, inputModel.ForceRebuild, inputModel.UseCompatibilityFileName))
+                using (var worker = new ExtractMetadataWorker(inputModel, inputModel.ForceRebuild, inputModel.UseCompatibilityFileName))
                 {
                     // Use task.run to get rid of current context (causing deadlock in xunit)
                     var task = Task.Run(worker.ExtractMetadataAsync);
                     task.Wait();
                 }
             }
+            EnvironmentContext.Clean();
         }
 
         private MetadataJsonConfig ParseOptions(MetadataCommandOptions options)
@@ -56,6 +58,7 @@ namespace Microsoft.DocAsCode.SubCommands
                 {
                     item.Raw |= options.PreserveRawInlineComments;
                     item.Force |= options.ForceRebuild;
+                    item.ShouldSkipMarkup |= options.ShouldSkipMarkup;
                     item.FilterConfigFile = options.FilterConfigFile ?? item.FilterConfigFile;
                 }
                 return config;
@@ -66,6 +69,7 @@ namespace Microsoft.DocAsCode.SubCommands
                 config.Add(new MetadataJsonItemConfig
                 {
                     Force = options.ForceRebuild,
+                    ShouldSkipMarkup = options.ShouldSkipMarkup,
                     Destination = options.OutputFolder,
                     Raw = options.PreserveRawInlineComments,
                     Source = new FileMapping(new FileMappingItem(options.Projects.ToArray())) { Expanded = true },
@@ -75,25 +79,27 @@ namespace Microsoft.DocAsCode.SubCommands
             }
         }
 
-        private IEnumerable<Microsoft.DocAsCode.Metadata.ManagedReference.ExtractMetadataInputModel> GetInputModels(MetadataJsonConfig configs)
+        private IEnumerable<ExtractMetadataInputModel> GetInputModels(MetadataJsonConfig configs)
         {
             foreach (var config in configs)
             {
                 config.Raw |= configs.Raw;
                 config.Force |= configs.Force;
+                config.ShouldSkipMarkup |= configs.ShouldSkipMarkup;
                 yield return ConvertToInputModel(config);
             }
         }
 
-        private Microsoft.DocAsCode.Metadata.ManagedReference.ExtractMetadataInputModel ConvertToInputModel(MetadataJsonItemConfig configModel)
+        private ExtractMetadataInputModel ConvertToInputModel(MetadataJsonItemConfig configModel)
         {
             var projects = configModel.Source;
             // If Root Output folder is specified from command line, use it instead of the base directory
             var outputFolder = Path.Combine(Config.OutputFolder ?? Config.BaseDirectory ?? string.Empty, configModel.Destination ?? DocAsCode.Constants.DefaultMetadataOutputFolderName);
-            var inputModel = new Microsoft.DocAsCode.Metadata.ManagedReference.ExtractMetadataInputModel
+            var inputModel = new ExtractMetadataInputModel
             {
                 PreserveRawInlineComments = configModel?.Raw ?? false,
                 ForceRebuild = configModel?.Force ?? false,
+                ShouldSkipMarkup = configModel?.ShouldSkipMarkup ?? false,
                 ApiFolderName = string.Empty,
                 FilterConfigFile = configModel?.FilterConfigFile,
                 UseCompatibilityFileName = configModel?.UseCompatibilityFileName ?? false,
@@ -125,7 +131,7 @@ namespace Microsoft.DocAsCode.SubCommands
             }
 
             // Get the first docfx.json config file
-            var configFiles = projects.FindAll(s => Path.GetFileName(s).Equals(DocAsCode.Constants.ConfigFileName, StringComparison.OrdinalIgnoreCase));
+            var configFiles = projects.FindAll(s => Path.GetExtension(s).Equals(Constants.ConfigFileExtension, StringComparison.OrdinalIgnoreCase) && !Path.GetFileName(s).Equals(Constants.SupportedProjectName));
             var otherFiles = projects.Except(configFiles).ToList();
 
             // Load and ONLY load docfx.json when it exists

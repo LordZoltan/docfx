@@ -15,6 +15,9 @@
   <a href="{{sourceurl}}">{{__global.viewSource}}</a>
 </span>{{/sourceurl}}
 {{/_disableContribution}}
+{{#overload}}
+<a id="{{id}}" data-uid="{{uid}}"></a>
+{{/overload}}
 <h4 id="{{id}}" data-uid="{{uid}}">{{name.0.value}}</h4>
 <div class="markdown level1 summary">{{{summary}}}</div>
 <div class="markdown level1 conceptual">{{{conceptual}}}</div>
@@ -38,7 +41,7 @@
 {{#parameters}}
     <tr>
       <td>{{{type.specName.0.value}}}</td>
-      <td><em>{{{id}}}</em></td>
+      <td><span class="parametername">{{{id}}}</span></td>
       <td>{{{description}}}</td>
     </tr>
 {{/parameters}}
@@ -76,7 +79,7 @@
 {{/typeParameters.0}}
 {{#typeParameters}}
     <tr>
-      <td><em>{{{id}}}</em></td>
+      <td><span class="parametername">{{{id}}}</span></td>
       <td>{{{description}}}</td>
     </tr>
 {{/typeParameters}}
@@ -138,17 +141,17 @@
 {{/syntax}}
 {{#overridden}}
 <h5 class="overrides">{{__global.overrides}}</h5>
-<div><xref href="{{uid}}" fullName="{{fullName.0.value}}" name="{{nameWithType.0.value}}"/></div>
+<div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/></div>
 {{/overridden}}
 {{#implements.0}}
 <h5 class="implements">{{__global.implements}}</h5>
 {{/implements.0}}
 {{#implements}}
   {{#definition}}
-    <div><xref href="{{definition}}" fullName="{{fullName.0.value}}" name="{{nameWithType.0.value}}"/></div>
+    <div><xref uid="{{definition}}" altProperty="fullName" displayProperty="nameWithType"/></div>
   {{/definition}}
   {{^definition}}
-    <div><xref href="{{uid}}" fullName="{{fullName.0.value}}" name="{{nameWithType.0.value}}"/></div>
+    <div><xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/></div>
   {{/definition}}
 {{/implements}}
 {{#remarks}}
@@ -205,10 +208,10 @@
 {{#extensionMethods}}
 <div>
   {{#definition}}
-    <xref href="{{definition}}" fullName="{{fullName.0.value}}" name="{{nameWithType.0.value}}"/>
+    <xref uid="{{definition}}" altProperty="fullName" displayProperty="nameWithType"/>
   {{/definition}}
   {{^definition}}
-    <xref href="{{uid}}" fullName="{{fullName.0.value}}" name="{{nameWithType.0.value}}"/>
+    <xref uid="{{uid}}" altProperty="fullName" displayProperty="nameWithType"/>
   {{/definition}}
 </div>
 {{/extensionMethods}}

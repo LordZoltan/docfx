@@ -15,15 +15,20 @@ namespace Microsoft.DocAsCode.Build.Engine
     using Microsoft.DocAsCode.Build.Engine.Incrementals;
     using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
+    using Microsoft.DocAsCode.Exceptions;
     using Microsoft.DocAsCode.Plugins;
-    using Microsoft.DocAsCode.Utility;
+
 
     public sealed class DocumentBuildContext : IDocumentBuildContext
     {
-        private readonly Dictionary<string, TocInfo> _tableOfContents = new Dictionary<string, TocInfo>(FilePathComparer.OSPlatformSensitiveStringComparer);
+        private readonly ConcurrentDictionary<string, TocInfo> _tableOfContents = new ConcurrentDictionary<string, TocInfo>(FilePathComparer.OSPlatformSensitiveStringComparer);
         private readonly Task<IXRefContainerReader> _reader;
 
-        public DocumentBuildContext(string buildOutputFolder) : this(buildOutputFolder, Enumerable.Empty<FileAndType>(), ImmutableArray<string>.Empty, ImmutableArray<string>.Empty, 1, Directory.GetCurrentDirectory()) { }
+        public DocumentBuildContext(string buildOutputFolder)
+            : this(buildOutputFolder, Enumerable.Empty<FileAndType>(), ImmutableArray<string>.Empty, ImmutableArray<string>.Empty, 1, Directory.GetCurrentDirectory(), string.Empty, null, null) { }
+
+        public DocumentBuildContext(string buildOutputFolder, IEnumerable<FileAndType> allSourceFiles, ImmutableArray<string> externalReferencePackages, ImmutableArray<string> xrefMaps, int maxParallelism, string baseFolder)
+            : this(buildOutputFolder, allSourceFiles, externalReferencePackages, xrefMaps, maxParallelism, baseFolder, string.Empty, null, null) { }
 
         public DocumentBuildContext(
             string buildOutputFolder,
@@ -31,9 +36,14 @@ namespace Microsoft.DocAsCode.Build.Engine
             ImmutableArray<string> externalReferencePackages,
             ImmutableArray<string> xrefMaps,
             int maxParallelism,
-            string baseFolder)
+            string baseFolder,
+            string versionName,
+            ApplyTemplateSettings applyTemplateSetting,
+            string rootTocPath)
         {
             BuildOutputFolder = buildOutputFolder;
+            VersionName = versionName;
+            ApplyTemplateSettings = applyTemplateSetting;
             AllSourceFiles = GetAllSourceFiles(allSourceFiles);
             ExternalReferencePackages = externalReferencePackages;
             XRefMapUrls = xrefMaps;
@@ -44,9 +54,14 @@ namespace Microsoft.DocAsCode.Build.Engine
                     from u in xrefMaps
                     select new Uri(u, UriKind.RelativeOrAbsolute)).GetReaderAsync(baseFolder);
             }
+            RootTocPath = rootTocPath;
         }
 
         public string BuildOutputFolder { get; }
+
+        public string VersionName { get; }
+
+        public ApplyTemplateSettings ApplyTemplateSettings { get; set; }
 
         public ImmutableArray<string> ExternalReferencePackages { get; }
 
@@ -56,17 +71,17 @@ namespace Microsoft.DocAsCode.Build.Engine
 
         public int MaxParallelism { get; }
 
-        public Dictionary<string, string> FileMap { get; } = new Dictionary<string, string>(FilePathComparer.OSPlatformSensitiveStringComparer);
+        public ConcurrentDictionary<string, string> FileMap { get; } = new ConcurrentDictionary<string, string>(FilePathComparer.OSPlatformSensitiveStringComparer);
 
         public ConcurrentDictionary<string, XRefSpec> XRefSpecMap { get; } = new ConcurrentDictionary<string, XRefSpec>();
 
-        public Dictionary<string, HashSet<string>> TocMap { get; } = new Dictionary<string, HashSet<string>>(FilePathComparer.OSPlatformSensitiveStringComparer);
+        public ConcurrentDictionary<string, HashSet<string>> TocMap { get; } = new ConcurrentDictionary<string, HashSet<string>>(FilePathComparer.OSPlatformSensitiveStringComparer);
 
         public HashSet<string> XRef { get; } = new HashSet<string>();
 
-        internal DependencyGraph DependencyGraph { get; } = new DependencyGraph();
+        public string RootTocPath { get; }
 
-        internal Dictionary<string, ChangeKindWithDependency> ChangeDict { get; } = new Dictionary<string, ChangeKindWithDependency>();
+        internal IncrementalBuildContext IncrementalBuildContext { get; set; }
 
         internal ConcurrentBag<ManifestItem> ManifestItems { get; } = new ConcurrentBag<ManifestItem>();
 
@@ -225,6 +240,62 @@ namespace Microsoft.DocAsCode.Build.Engine
             FileMap[key] = filePath;
         }
 
+        public string UpdateHref(string href)
+        {
+            if (href == null)
+            {
+                throw new ArgumentNullException(nameof(href));
+            }
+            return UpdateHrefCore(href, null);
+        }
+
+        public string UpdateHref(string href, RelativePath fromFile)
+        {
+            if (href == null)
+            {
+                throw new ArgumentNullException(nameof(href));
+            }
+            if (fromFile != null && !fromFile.IsFromWorkingFolder())
+            {
+                throw new ArgumentException("File must be from working folder (i.e. start with '~/').", nameof(fromFile));
+            }
+            return UpdateHrefCore(href, fromFile);
+        }
+
+        private string UpdateHrefCore(string href, RelativePath fromFile)
+        {
+            if (href.Length == 0)
+            {
+                return string.Empty;
+            }
+            var path = UriUtility.GetPath(href);
+            if (path.Length == 0)
+            {
+                return href;
+            }
+            var qf = UriUtility.GetQueryStringAndFragment(href);
+            var rp = RelativePath.TryParse(path);
+            if (rp == null || !rp.IsFromWorkingFolder())
+            {
+                return href;
+            }
+            string filePath;
+            if (!FileMap.TryGetValue(rp.UrlDecode(), out filePath))
+            {
+                return href;
+            }
+            string modifiedPath;
+            if (fromFile == null)
+            {
+                modifiedPath = ((RelativePath)filePath).UrlEncode();
+            }
+            else
+            {
+                modifiedPath = ((RelativePath)filePath - fromFile).UrlEncode();
+            }
+            return modifiedPath + qf;
+        }
+
         // TODO: use this method instead of directly accessing UidMap
         public void RegisterInternalXrefSpec(XRefSpec xrefSpec)
         {
@@ -232,6 +303,23 @@ namespace Microsoft.DocAsCode.Build.Engine
             if (string.IsNullOrEmpty(xrefSpec.Href)) throw new ArgumentException("Href for xref spec must contain value");
             if (!PathUtility.IsRelativePath(xrefSpec.Href)) throw new ArgumentException("Only relative href path is supported");
             XRefSpecMap[xrefSpec.Uid] = xrefSpec;
+        }
+
+        public void RegisterInternalXrefSpecBookmark(string uid, string bookmark)
+        {
+            if (string.IsNullOrEmpty(uid)) throw new ArgumentNullException(nameof(uid));
+            if (bookmark == null) throw new ArgumentNullException(nameof(uid));
+            if (bookmark == string.Empty) return;
+
+            XRefSpec xref;
+            if (XRefSpecMap.TryGetValue(uid, out xref))
+            {
+                xref.Href = UriUtility.GetNonFragment(xref.Href) + "#" + bookmark;
+            }
+            else
+            {
+                throw new DocfxException($"Xref spec with uid {uid} not found. Can't register bookmark {bookmark} to it.");
+            }
         }
 
         public XRefSpec GetXrefSpec(string uid)
@@ -298,15 +386,11 @@ namespace Microsoft.DocAsCode.Build.Engine
         {
             if (string.IsNullOrEmpty(fileKey)) throw new ArgumentNullException(nameof(fileKey));
             if (string.IsNullOrEmpty(tocFileKey)) throw new ArgumentNullException(nameof(tocFileKey));
-            HashSet<string> sets;
-            if (TocMap.TryGetValue(fileKey, out sets))
-            {
-                sets.Add(tocFileKey);
-            }
-            else
-            {
-                TocMap[fileKey] = new HashSet<string>(FilePathComparer.OSPlatformSensitiveComparer) { tocFileKey };
-            }
+
+            TocMap.AddOrUpdate(
+                fileKey,
+                new HashSet<string>(FilePathComparer.OSPlatformSensitiveComparer) { tocFileKey },
+                (k, v) => { v.Add(tocFileKey); return v; });
         }
 
         public void RegisterTocInfo(TocInfo toc)

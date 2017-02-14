@@ -1,37 +1,25 @@
 // Copyright (c) Microsoft. All rights reserved. Licensed under the MIT license. See LICENSE file in the project root for full license information.
 var common = require('./common.js');
+var classCategory = 'class';
+var namespaceCategory = 'ns';
 
 exports.transform = function (model)  {
-  var namespaceItems = {
-    "class":        { inClass: true,        typePropertyName: "inClass",        id: "classes" },
-    "struct":       { inStruct: true,       typePropertyName: "inStruct",       id: "structs" },
-    "interface":    { inInterface: true,    typePropertyName: "inInterface",    id: "interfaces" },
-    "enum":         { inEnum: true,         typePropertyName: "inEnum",         id: "enums" },
-    "delegate":     { inDelegate: true,     typePropertyName: "inDelegate",     id: "delegates" }
-  };
-  var classItems = {
-    "constructor":  { inConstructor: true,  typePropertyName: "inConstructor",  id: "constructors" },
-    "field":        { inField: true,        typePropertyName: "inField",        id: "fields" },
-    "property":     { inProperty: true,     typePropertyName: "inProperty",     id: "properties" },
-    "method":       { inMethod: true,       typePropertyName: "inMethod",       id: "methods" },
-    "event":        { inEvent: true,        typePropertyName: "inEvent",        id: "events" },
-    "operator":     { inOperator: true,     typePropertyName: "inOperator",     id: "operators" },
-    "eii":          { inEii: true,          typePropertyName: "inEii",          id: "eii" }
-  };
 
   if (!model) return null;
 
   langs = model.langs;
   handleItem(model, model._gitContribute, model._gitUrlPattern);
   if (model.children) {
-      model.children.forEach(function (item) { handleItem(item, model._gitContribute, model._gitUrlPattern); });
+    model.children.forEach(function (item) {
+      handleItem(item, model._gitContribute, model._gitUrlPattern);
+    });
   }
 
   if (model.type) {
     switch (model.type.toLowerCase()) {
       case 'namespace':
         model.isNamespace = true;
-        if (model.children) groupChildren(model, namespaceItems);
+        if (model.children) groupChildren(model, namespaceCategory);
         break;
       case 'class':
       case 'interface':
@@ -39,8 +27,8 @@ exports.transform = function (model)  {
       case 'delegate':
       case 'enum':
         model.isClass = true;
-        if (model.children) groupChildren(model, classItems);
-        model[namespaceItems[model.type.toLowerCase()].typePropertyName] = true;
+        if (model.children) groupChildren(model, classCategory);
+        model[getTypePropertyName(model.type)] = true;
         handleNamespace(model);
         break;
       default:
@@ -51,9 +39,36 @@ exports.transform = function (model)  {
   return model;
 }
 
-function groupChildren(model, typeChildrenItems) {
-  var grouped = {};
+exports.getBookmarks = function (model)  {
+  if (!model || !model.type || model.type.toLowerCase() === "namespace") return null;
 
+  var bookmarks = {};
+  // Reference's first level bookmark should have no anchor
+  bookmarks[model.uid] = "";
+
+  if (model.children) {
+    model.children.forEach(function (item) {
+      bookmarks[item.uid] = common.getHtmlId(item.uid);
+      if (item.overload && item.overload.uid) {
+        bookmarks[item.overload.uid] = common.getHtmlId(item.overload.uid);
+      }
+    });
+  }
+
+  return bookmarks;
+}
+
+exports.groupChildren = groupChildren;
+exports.getTypePropertyName = getTypePropertyName;
+exports.getCategory = getCategory;
+
+function groupChildren(model, category) {
+  if (!model || !model.type) {
+    return;
+  }
+  var typeChildrenItems = getDefinitions(category);
+  var grouped = {};
+  
   model.children.forEach(function (c) {
     if (c.isEii) {
       var type = "eii";
@@ -80,18 +95,91 @@ function groupChildren(model, typeChildrenItems) {
     }
     grouped[type].push(c);
   })
+
   var children = [];
   for (var key in typeChildrenItems) {
     if (typeChildrenItems.hasOwnProperty(key) && grouped.hasOwnProperty(key)) {
       var typeChildrenItem = typeChildrenItems[key];
-      var items = typeChildrenItem.children = grouped[key];
+      var items = grouped[key];
       if (items && items.length > 0) {
-        children.push(typeChildrenItem);
+        var item = {};
+        for (var itemKey in typeChildrenItem) {
+          if (typeChildrenItem.hasOwnProperty(itemKey)){
+            item[itemKey] = typeChildrenItem[itemKey];
+          }
+        }
+        item.children = items;
+        children.push(item);
       }
     }
   }
 
   model.children = children;
+}
+
+function getTypePropertyName(type) {
+  if (!type) {
+    return undefined;
+  }
+  var loweredType = type.toLowerCase();
+  var definition = getDefinition(loweredType);
+  if (definition) {
+    return definition.typePropertyName;
+  }
+
+  return undefined;
+}
+
+function getCategory(type) {
+  var classItems = getDefinitions(classCategory);
+  if (classItems.hasOwnProperty(type)) {
+    return classCategory;
+  }
+
+  var namespaceItems = getDefinitions(namespaceCategory);
+  if (namespaceItems.hasOwnProperty(type)) {
+    return namespaceCategory;
+  }
+  return undefined;
+}
+
+function getDefinition(type) {
+  var classItems = getDefinitions(classCategory);
+  if (classItems.hasOwnProperty(type)) {
+    return classItems[type];
+  }
+  var namespaceItems = getDefinitions(namespaceCategory);
+  if (namespaceItems.hasOwnProperty(type)) {
+    return namespaceItems[type];
+  }
+  return undefined;
+}
+
+function getDefinitions(category) {
+  var namespaceItems = {
+    "class":        { inClass: true,        typePropertyName: "inClass",        id: "classes" },
+    "struct":       { inStruct: true,       typePropertyName: "inStruct",       id: "structs" },
+    "interface":    { inInterface: true,    typePropertyName: "inInterface",    id: "interfaces" },
+    "enum":         { inEnum: true,         typePropertyName: "inEnum",         id: "enums" },
+    "delegate":     { inDelegate: true,     typePropertyName: "inDelegate",     id: "delegates" }
+  };
+  var classItems = {
+    "constructor":  { inConstructor: true,  typePropertyName: "inConstructor",  id: "constructors" },
+    "field":        { inField: true,        typePropertyName: "inField",        id: "fields" },
+    "property":     { inProperty: true,     typePropertyName: "inProperty",     id: "properties" },
+    "method":       { inMethod: true,       typePropertyName: "inMethod",       id: "methods" },
+    "event":        { inEvent: true,        typePropertyName: "inEvent",        id: "events" },
+    "operator":     { inOperator: true,     typePropertyName: "inOperator",     id: "operators" },
+    "eii":          { inEii: true,          typePropertyName: "inEii",          id: "eii" }
+  };
+  if (category === 'class') {
+    return classItems;
+  }
+  if (category === 'ns') {
+    return namespaceItems;
+  }
+  console.err("category '" + category + "' is not valid.");
+  return undefined;
 }
 
 // reserve "namespace" of string for backward compatibility
@@ -115,6 +203,12 @@ function handleItem(vm, gitContribute, gitUrlPattern) {
   vm.syntax = vm.syntax || null;
   vm.implements = vm.implements || null;
   common.processSeeAlso(vm);
+
+  // id is used as default template's bookmark
+  vm.id = common.getHtmlId(vm.uid);
+  if (vm.overload && vm.overload.uid) {
+    vm.overload.id = common.getHtmlId(vm.overload.uid);
+  }
 
   if (vm.supported_platforms) {
       vm.supported_platforms = transformDictionaryToArray(vm.supported_platforms);

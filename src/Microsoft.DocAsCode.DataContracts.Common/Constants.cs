@@ -7,6 +7,7 @@ namespace Microsoft.DocAsCode.DataContracts.Common
     {
         public const string YamlExtension = ".yml";
         public const string ContentPlaceholder = "*content";
+        public const string PrefixSeparator = ".";
 
         /// <summary>
         /// TODO: add other property name const
@@ -24,6 +25,25 @@ namespace Microsoft.DocAsCode.DataContracts.Common
             public const string Title = "title";
             public const string Conceptual = "conceptual";
             public const string Documentation = "documentation";
+
+            public const string Name = "name";
+            public const string DisplayName = "displayName";
+            public const string NameWithType = "nameWithType";
+            public const string FullName = "fullName";
+            public const string TocHref = "tocHref";
+            public const string TopicHref = "topicHref";
+            public const string TopicUid = "topicUid";
+
+            public const string SystemKeys = "_systemKeys";
+        }
+
+        public static class ExtensionMemberPrefix
+        {
+            public const string NameWithType = PropertyName.NameWithType + PrefixSeparator;
+            public const string FullName = PropertyName.FullName + PrefixSeparator;
+            public const string Name = PropertyName.Name + PrefixSeparator;
+            public const string Modifiers = "modifiers" + PrefixSeparator;
+            public const string Spec = "spec" + PrefixSeparator;
         }
 
         public static class DevLang

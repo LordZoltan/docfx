@@ -12,7 +12,6 @@ namespace Microsoft.DocAsCode.Build.Engine
     using Jint.Native.Object;
 
     using Microsoft.DocAsCode.Common;
-    using Microsoft.DocAsCode.Utility;
 
     public class TemplateJintPreprocessor : ITemplatePreprocessor
     {

@@ -79,6 +79,7 @@ namespace Microsoft.DocAsCode.Build.RestApi
                                 Parameters = parameters?.Select(s => new RestApiParameterViewModel
                                 {
                                     Description = s.Description,
+                                    Name = s.Name,
                                     Metadata = s.Metadata
                                 }).ToList(),
                                 Responses = operation.Responses?.Select(s => new RestApiResponseViewModel
@@ -96,7 +97,15 @@ namespace Microsoft.DocAsCode.Build.RestApi
                             };
 
                             // TODO: line number
-                            itemVm.Metadata[Constants.PropertyName.Source] = swagger.Metadata[Constants.PropertyName.Source];
+                            object value;
+                            if (swagger.Metadata.TryGetValue(Constants.PropertyName.Source, out value))
+                            {
+                                itemVm.Metadata[Constants.PropertyName.Source] = value;
+                            }
+                            else
+                            {
+                                itemVm.Metadata[Constants.PropertyName.Source] = null;
+                            }
                             vm.Children.Add(itemVm);
                         }
                     }
@@ -184,7 +193,7 @@ namespace Microsoft.DocAsCode.Build.RestApi
             {
                 return false;
             }
-            return string.Equals(GetMetadataStringValue(left, "name"), GetMetadataStringValue(right, "name")) &&
+            return string.Equals(left.Name, right.Name) &&
                    string.Equals(GetMetadataStringValue(left, "in"), GetMetadataStringValue(right, "in"));
         }
 

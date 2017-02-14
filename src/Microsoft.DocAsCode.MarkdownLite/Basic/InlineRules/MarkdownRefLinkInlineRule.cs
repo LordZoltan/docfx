@@ -18,6 +18,10 @@ namespace Microsoft.DocAsCode.MarkdownLite
             {
                 return null;
             }
+            if (MarkdownInlineContext.GetIsInLink(parser.Context) && match.Value[0] != '!')
+            {
+                return null;
+            }
 
             var linkStr = match.NotEmpty(2, 1).ReplaceRegex(Regexes.Lexers.WhiteSpaces, " ");
 

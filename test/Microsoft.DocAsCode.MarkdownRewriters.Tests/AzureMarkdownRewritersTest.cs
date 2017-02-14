@@ -555,11 +555,34 @@ _Em Text_
 - Simple text";
             var expected = @"# Test Complex String Em Del
 **Strong Text**
-
 <div>
 *Em Text*
-
 <div>
+
+* ~~Del Text~~
+* Simple text
+
+";
+            var result = AzureMarked.Markup(source);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownRewriters_ComplexStrongEmDel2()
+        {
+            var source = @"# Test Complex String Em Del
+__Strong Text__
+<div>
+_Em Text_
+</div>
+- ~~Del Text~~
+- Simple text";
+            var expected = @"# Test Complex String Em Del
+**Strong Text**
+<div>
+*Em Text*
+</div>
 
 * ~~Del Text~~
 * Simple text
@@ -1139,8 +1162,8 @@ This command must be run in the context of each domain user that has signed into
      This process must be repeated for each domain user that has signed into the machine and has been automatically workplace joined.
 * Option 2: Unregister a Windows 8.1 domain joined device using a script
   
-      1. Open a command prompt on the Windows 8.1 machine and execute the following command:
-   ` %SystemRoot%\System32\AutoWorkplace.exe leave`
+  1. Open a command prompt on the Windows 8.1 machine and execute the following command:
+     ` %SystemRoot%\System32\AutoWorkplace.exe leave`
 
 This command must be run in the context of each domain user that has signed into the machine.
 
@@ -1224,6 +1247,163 @@ This command must be run in the context of each domain user that has signed into
 ";
 
             var result = AzureMigrationMarked.Markup(source, "sourceFile.md", azureVideoInfoMapping: azureVideoInfoMapping);
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownMigrationRewriters_AzureProperties_SiteIdentifierAtTheEnd()
+        {
+            var source = @"<properties
+   pageTitle=""Azure Container Service Introduction | Microsoft  Azure ""
+   description=""Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.""
+   services=""virtual-machines""
+   documentationCenter=""""
+   authors=""rgardler; fenxu""
+   manager=""nepeters""
+   editor=""""
+   tags=""acs, azure-container-service""
+   keywords=""Docker, Containers, Micro-services, Mesos, Azure""/>
+
+<tags
+   ms.service=""virtual-machines""
+   ms.devlang=""na""
+   ms.topic=""home-page""
+   ms.tgt_pltfrm=""na""
+   ms.workload=""na""
+   ms.date=""12/02/2015""
+   ms.author=""rogardle""/>
+
+# Azure Container Service Introduction
+";
+            var expected = @"---
+title: Azure Container Service Introduction | Microsoft Docs
+description: Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.
+services: virtual-machines
+documentationcenter: ''
+author: rgardler
+manager: nepeters
+editor: ''
+tags: acs, azure-container-service
+keywords: Docker, Containers, Micro-services, Mesos, Azure
+
+ms.service: virtual-machines
+ms.devlang: na
+ms.topic: home-page
+ms.tgt_pltfrm: na
+ms.workload: na
+ms.date: 12/02/2015
+ms.author: rogardle
+
+---
+# Azure Container Service Introduction
+";
+            var result = AzureMigrationMarked.Markup(source, "azure_file.md");
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownMigrationRewriters_AzureProperties_SiteIdentifierInTheMiddle()
+        {
+            var source = @"<properties
+   pageTitle=""Azure Container Service Introduction |   Microsoft Azure  | Microsoft Azure Storage ""
+   description=""Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.""
+   services=""virtual-machines""
+   documentationCenter=""""
+   authors=""rgardler; fenxu""
+   manager=""nepeters""
+   editor=""""
+   tags=""acs, azure-container-service""
+   keywords=""Docker, Containers, Micro-services, Mesos, Azure""/>
+
+<tags
+   ms.service=""virtual-machines""
+   ms.devlang=""na""
+   ms.topic=""home-page""
+   ms.tgt_pltfrm=""na""
+   ms.workload=""na""
+   ms.date=""12/02/2015""
+   ms.author=""rogardle""/>
+
+# Azure Container Service Introduction
+";
+            var expected = @"---
+title: Azure Container Service Introduction | Microsoft Docs
+description: Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.
+services: virtual-machines
+documentationcenter: ''
+author: rgardler
+manager: nepeters
+editor: ''
+tags: acs, azure-container-service
+keywords: Docker, Containers, Micro-services, Mesos, Azure
+
+ms.service: virtual-machines
+ms.devlang: na
+ms.topic: home-page
+ms.tgt_pltfrm: na
+ms.workload: na
+ms.date: 12/02/2015
+ms.author: rogardle
+
+---
+# Azure Container Service Introduction
+";
+            var result = AzureMigrationMarked.Markup(source, "azure_file.md");
+            Assert.Equal(expected.Replace("\r\n", "\n"), result);
+        }
+
+        [Fact]
+        [Trait("Related", "AzureMarkdownRewriters")]
+        public void TestAzureMarkdownMigrationRewriters_AzureProperties_NoSiteIdentifier()
+        {
+            var source = @"<properties
+   pageTitle=""Azure Container Service Introduction | Microsoft Azure Storage ""
+   description=""Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.""
+   services=""virtual-machines""
+   documentationCenter=""""
+   authors=""rgardler; fenxu""
+   manager=""nepeters""
+   editor=""""
+   tags=""acs, azure-container-service""
+   keywords=""Docker, Containers, Micro-services, Mesos, Azure""/>
+
+<tags
+   ms.service=""virtual-machines""
+   ms.devlang=""na""
+   ms.topic=""home-page""
+   ms.tgt_pltfrm=""na""
+   ms.workload=""na""
+   ms.date=""12/02/2015""
+   ms.author=""rogardle""/>
+
+# Azure Container Service Introduction
+";
+            var expected = @"---
+title: Azure Container Service Introduction | Microsoft Docs
+description: Azure Container Service (ACS) provides a way to simplify the creation, configuration, and management of a cluster of virtual machines that are preconfigured to run containerized applications.
+services: virtual-machines
+documentationcenter: ''
+author: rgardler
+manager: nepeters
+editor: ''
+tags: acs, azure-container-service
+keywords: Docker, Containers, Micro-services, Mesos, Azure
+
+ms.service: virtual-machines
+ms.devlang: na
+ms.topic: home-page
+ms.tgt_pltfrm: na
+ms.workload: na
+ms.date: 12/02/2015
+ms.author: rogardle
+
+---
+# Azure Container Service Introduction
+";
+            var result = AzureMigrationMarked.Markup(source, "azure_file.md");
             Assert.Equal(expected.Replace("\r\n", "\n"), result);
         }
 

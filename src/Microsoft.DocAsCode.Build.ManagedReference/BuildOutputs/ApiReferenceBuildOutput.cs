@@ -11,6 +11,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
     using Newtonsoft.Json;
     using YamlDotNet.Serialization;
 
+    using Microsoft.DocAsCode.Common;
     using Microsoft.DocAsCode.DataContracts.Common;
     using Microsoft.DocAsCode.DataContracts.ManagedReference;
     using Microsoft.DocAsCode.YamlSerialization;
@@ -21,10 +22,6 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
         [YamlMember(Alias = "uid")]
         [JsonProperty("uid")]
         public string Uid { get; set; }
-
-        [YamlMember(Alias = "id")]
-        [JsonProperty("id")]
-        public string Id { get; set; }
 
         [YamlMember(Alias = "isEii")]
         [JsonProperty("isEii")]
@@ -98,6 +95,10 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
         [JsonProperty("overridden")]
         public ApiNames Overridden { get; set; }
 
+        [YamlMember(Alias = "overload")]
+        [JsonProperty("overload")]
+        public ApiNames Overload { get; set; }
+
         [YamlMember(Alias = "exceptions")]
         [JsonProperty("exceptions")]
         public List<ApiExceptionInfoBuildOutput> Exceptions { get; set; }
@@ -130,7 +131,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
         [JsonProperty("extensionMethods")]
         public List<string> ExtensionMethods { get; set; }
 
-        [ExtensibleMember("modifiers.")]
+        [ExtensibleMember(Constants.ExtensionMemberPrefix.Modifiers)]
         [JsonIgnore]
         public SortedList<string, List<string>> Modifiers { get; set; } = new SortedList<string, List<string>>();
 
@@ -152,24 +153,13 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
 
         [EditorBrowsable(EditorBrowsableState.Never)]
         [YamlIgnore]
-        [JsonExtensionData(ReadData = false, WriteData = true)]
-        public Dictionary<string, object> MetadataJson
-        {
-            get
-            {
-                var dict = new Dictionary<string, object>();
-                foreach (var item in Modifiers)
-                {
-                    dict["modifiers." + item.Key] = item.Value;
-                }
-                foreach (var item in Metadata)
-                {
-                    dict[item.Key] = item.Value;
-                }
-                return dict;
-            }
-            set { }
-        }
+        [JsonExtensionData]
+        public CompositeDictionary MetadataJson =>
+            CompositeDictionary
+                .CreateBuilder()
+                .Add(Constants.ExtensionMemberPrefix.Modifiers, Modifiers, JTokenConverter.Convert<List<string>>)
+                .Add(string.Empty, Metadata)
+                .Create();
 
         private bool _needExpand = true;
 
@@ -192,7 +182,6 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             var result = new ApiReferenceBuildOutput
             {
                 Uid = vm.Uid,
-                Id = Utility.GetHtmlId(vm.Uid),
                 Parent = vm.Parent,
                 Definition = vm.Definition,
                 IsExternal = vm.IsExternal,
@@ -200,7 +189,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Name = ApiBuildOutputUtility.TransformToLanguagePairList(vm.Name, vm.NameInDevLangs, supportedLanguages),
                 NameWithType = ApiBuildOutputUtility.TransformToLanguagePairList(vm.NameWithType, vm.NameWithTypeInDevLangs, supportedLanguages),
                 FullName = ApiBuildOutputUtility.TransformToLanguagePairList(vm.FullName, vm.FullNameInDevLangs, supportedLanguages),
-                Spec = GetSpecNames(ApiBuildOutputUtility.GetXref(vm.Uid, vm.FullName, vm.Name), supportedLanguages, vm.Specs),
+                Spec = GetSpecNames(ApiBuildOutputUtility.GetXref(vm.Uid, vm.Name, vm.FullName), supportedLanguages, vm.Specs),
                 Metadata = vm.Additional,
             };
             object syntax;
@@ -219,7 +208,6 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             var output = new ApiReferenceBuildOutput
             {
                 Uid = vm.Uid,
-                Id = Utility.GetHtmlId(vm.Uid),
                 IsExplicitInterfaceImplementation = vm.IsExplicitInterfaceImplementation,
                 IsExtensionMethod = vm.IsExtensionMethod,
                 Parent = vm.Parent,
@@ -228,7 +216,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Name = ApiBuildOutputUtility.TransformToLanguagePairList(vm.Name, vm.Names, vm.SupportedLanguages),
                 NameWithType = ApiBuildOutputUtility.TransformToLanguagePairList(vm.NameWithType, vm.NamesWithType, vm.SupportedLanguages),
                 FullName = ApiBuildOutputUtility.TransformToLanguagePairList(vm.FullName, vm.FullNames, vm.SupportedLanguages),
-                Spec = GetSpecNames(ApiBuildOutputUtility.GetXref(vm.Uid, vm.FullName, vm.Name), vm.SupportedLanguages),
+                Spec = GetSpecNames(ApiBuildOutputUtility.GetXref(vm.Uid, vm.Name, vm.FullName), vm.SupportedLanguages),
                 Source = vm.Source,
                 Documentation = vm.Documentation,
                 AssemblyNameList = vm.AssemblyNameList,
@@ -236,10 +224,11 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Remarks = vm.Remarks,
                 Examples = vm.Examples,
                 Overridden = ApiNames.FromUid(vm.Overridden),
-                SeeAlsos = vm.SeeAlsos?.Select(s => ApiLinkInfoBuildOutput.FromModel(s)).ToList(),
-                Sees = vm.Sees?.Select(s => ApiLinkInfoBuildOutput.FromModel(s)).ToList(),
-                Inheritance = vm.Inheritance?.Select(i => FromUid(i)).ToList(),
-                Implements = vm.Implements?.Select(i => ApiNames.FromUid(i)).ToList(),
+                Overload = ApiNames.FromUid(vm.Overload),
+                SeeAlsos = vm.SeeAlsos?.Select(ApiLinkInfoBuildOutput.FromModel).ToList(),
+                Sees = vm.Sees?.Select(ApiLinkInfoBuildOutput.FromModel).ToList(),
+                Inheritance = vm.Inheritance?.Select(FromUid).ToList(),
+                Implements = vm.Implements?.Select(ApiNames.FromUid).ToList(),
                 InheritedMembers = vm.InheritedMembers,
                 ExtensionMethods = vm.ExtensionMethods,
                 Modifiers = vm.Modifiers,
@@ -247,7 +236,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 Metadata = vm.Metadata,
                 Attributes = vm.Attributes,
                 Syntax = ApiSyntaxBuildOutput.FromModel(vm.Syntax, vm.SupportedLanguages),
-                Exceptions = vm.Exceptions?.Select(s => ApiExceptionInfoBuildOutput.FromModel(s)).ToList(),
+                Exceptions = vm.Exceptions?.Select(ApiExceptionInfoBuildOutput.FromModel).ToList(),
             };
             output.Metadata["type"] = vm.Type;
             output.Metadata["summary"] = vm.Summary;
@@ -267,6 +256,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
                 SeeAlsos?.ForEach(e => e.Expand(references, supportedLanguages));
                 Sees?.ForEach(e => e.Expand(references, supportedLanguages));
                 Exceptions?.ForEach(e => e.Expand(references, supportedLanguages));
+                Overload = ApiBuildOutputUtility.GetApiNames(Overload?.Uid, references, supportedLanguages);
             }
         }
 
@@ -286,7 +276,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
         private static string GetSpecName(List<SpecViewModel> spec)
         {
             if (spec == null) return null;
-            return string.Concat(spec.Select(s => GetCompositeName(s)));
+            return string.Concat(spec.Select(GetCompositeName));
         }
 
         private static string GetCompositeName(SpecViewModel svm)
@@ -295,7 +285,7 @@ namespace Microsoft.DocAsCode.Build.ManagedReference.BuildOutputs
             if (string.IsNullOrEmpty(svm.Uid)) { return System.Web.HttpUtility.HtmlEncode(svm.FullName); }
 
             // If href exists, return name with href
-            return ApiBuildOutputUtility.GetXref(svm.Uid, svm.FullName, svm.Name);
+            return ApiBuildOutputUtility.GetXref(svm.Uid, svm.Name, svm.FullName);
         }
     }
 }
